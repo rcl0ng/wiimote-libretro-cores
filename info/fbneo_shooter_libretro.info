@@ -1,0 +1,27 @@
+# Software Information
+display_name = "Arcade - FBNeo (IR Shooters)"
+authors = "FinalBurn Neo team|Galaga IR custom modifications"
+supported_extensions = "zip|7z"
+corename = "FBNeo Galaga IR"
+categories = "Emulator"
+license = "Non-commercial"
+permissions = ""
+display_version = "1.0.0 RC2"
+
+# Hardware Information
+manufacturer = "Namco|Taito"
+systemname = "Arcade IR Shooters"
+systemid = "arcade"
+database = "FBNeo - Arcade Games"
+
+# Firmware / BIOS
+firmware_count = "0"
+notes = "Absolute left-stick control for Galaga, Galaxian, Galaga 3 (Gaplus) and Galaga 88. Extra Ships picker: Galaga 1, Gaplus 1-6, Galaga 88 1-2. Cheats are grouped under Core Options > Cheats. Select Wiimote IR Ship + Buttons under Controls."
+
+# Libretro Features
+supports_no_game = "false"
+is_experimental = "true"
+needs_fullpath = "true"
+block_extract = "true"
+
+description = "Absolute ship positioning for specific Galaga, Galaxian, Gaplus and Galaga 88 sets. Optional cheats and native extra-ship counts. Alternating players only; Space Invaders is not recommended."

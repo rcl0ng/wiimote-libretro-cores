@@ -1,0 +1,14 @@
+# Publish v1.0.0 on GitHub
+
+Use two repositories: `wiimote-libretro-cores` and `chihiro-libretro`. The Chihiro converter belongs with its core. An installer is not needed for this release.
+
+1. Sign in to your existing GitHub account and choose **+ → New repository**. Start with `wiimote-libretro-cores`. Description: “Windows libretro cores for Wiimote IR via Lichtknarre and vJoy: guns, selected SNES mouse games and arcade pointing.” You may start private while preparing the page. Do not select a blanket license template: these cores have different upstream terms, including noncommercial restrictions.
+2. Extract the matching folder from `GitHub_Repository_Starters_v1.0.0.zip`. Upload its CONTENTS, preserving folders, with Add file → Upload files, or use GitHub Desktop. Commit them to the main branch. This starter contains public docs, info/autoconfig, notices and patches; full emulator and dependency sources are in the release package, not duplicated into this small starter.
+3. Create the second repository `chihiro-libretro`. Description: “Windows Chihiro libretro core and XBE-package converter, with gamepad and vJoy gun input, card saves and optional widescreen profiles.” Upload its matching starter contents.
+4. For each repository, use Releases → Draft a new release. Choose/create tag **v1.0.0**, title **v1.0.0 — Windows x64**, and copy RELEASE-NOTES.md. Attach its matching Windows ZIP and `Release_SHA256SUMS.txt`. The Windows ZIP includes source, patches, licenses and build material. Attach both binaries AND their included sources together; do not strip the development/licenses directories from the distributed package. GitHub's automatic “Source code” ZIP is only the small starter tree and does not replace the full source-bearing release asset.
+5. Review the draft and download/verify its assets before publishing. Publish the repository/release when ready. Link from README to the Releases page; the included relative ../../releases/latest link works when README is in the repository root. Keep old release assets available with their matching sources.
+6. Announce after download links work. Check current rules in r/Lightgun and r/RetroArch before posting. Video is optional. Explain the exact tested setup, supported titles, limitations and independent project status. Credit upstream authors. No posts or comments have been sent.
+
+Ron reports he is rclong in https://github.com/libretro/RetroArch/issues/13425 . A technical follow-up may link the code/release and explain this core-specific implementation; it does not fix the frontend-wide issue.
+
+Official walkthroughs: https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-new-repository and https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository .

@@ -1,0 +1,29 @@
+# Software Information
+display_name = "Arcade - FBNeo (IR Mouse)"
+corename = "FinalBurn Neo (custom mouse subset)"
+authors = "FinalBurn Neo Team"
+supported_extensions = "zip|7z"
+license = "Non-commercial"
+permissions = ""
+categories = "Emulator"
+display_version = "1.0.0 RC2"
+
+# Hardware Information
+manufacturer = "Various"
+systemname = "Arcade"
+systemid = "arcade"
+database = "FBNeo - Arcade Games"
+
+# Firmware / BIOS
+firmware_count = "1"
+firmware0_desc = "Neo Geo BIOS (required for Neo Pong)"
+firmware0_path = "neogeo.zip"
+firmware0_opt = "true"
+notes = "Pointing profiles: arkanoid, centiped, milliped, missile. Experimental independent dual paddles: neopong v1.1. Neo Pong uses a device-specific in-memory program patch; original ROM ZIP stays unchanged. Other Neo Geo games have no custom paddle profile."
+
+# Libretro Features
+supports_no_game = "false"
+needs_fullpath = "true"
+block_extract = "true"
+
+description = "Custom pointing profiles for Arkanoid, Centipede, Millipede and Missile Command, plus independent NeoPong v1.1 paddles using guarded in-memory patches. Reduced game subset; matching ROM sets required."
