@@ -1,0 +1,71 @@
+Snes9x Analog Mouse v9 — FPS Hybrid Controls
+
+INSTALL
+Close RetroArch. Back up your existing custom DLL, then replace it with
+snes9x_analog_mouse_libretro.dll from this ZIP in the same cores folder.
+The filename is unchanged. The .info file goes in RetroArch's info folder.
+
+DOOM / WOLF3D SETUP
+Use your existing vJoy device on frontend input Port 1.
+Keep Analog to Digital Type = None, sensitivity 1.0 and deadzone 0.0.
+Quick Menu > Core Options:
+  FPS Hybrid Controls = Automatic (Doom / Wolf3D)
+  FPS Turning Sensitivity = 1x to start (2x / 4x also available)
+Save Game Options, then restart content.
+The core automatically configures the necessary internal SNES devices.
+Frontend Port 1 supplies BOTH the Wiimote axes and the gamepad buttons.
+You can leave Quick Menu's Port 1 device set to RetroPad for this mode.
+Wolf3D uses gamepad on SNES port 1, mouse on SNES port 2 internally;
+Doom uses mouse on SNES port 1 plus a game-specific input-command bridge.
+You do not need to assign another vJoy device or a second physical controller.
+
+CONTROLS (RETROPAD BINDINGS)
+Left analog horizontal motion: turn left/right only while moving Wiimote.
+D-pad Up/Down: walk forward/back.
+D-pad Left/Right: strafe left/right.
+B: fire / menu confirm.
+A: use / open doors.
+X: change weapon.
+Y: run (hold with movement).
+Start: game menu/map (Doom menu; Wolf3D map).
+Select: reserved for frontend hotkeys, not sent as an FPS game command.
+These are RetroPad names; physical Wiimote buttons follow your vJoy bindings.
+Vertical Wiimote motion is ignored in FPS mode.
+Doom uses its stock behavior: strafing temporarily takes priority over turning.
+
+TEST
+Start Wolf3D with Start; use Start to pass the briefing. Move the Wiimote left
+or right, then hold it still off-center. Turning should stop. Test forward/back,
+strafing, firing and A at the first door. X selects among available weapons.
+For Doom, use B to confirm/start and fire. Test movement, use and weapon cycle.
+Keep SuperFX Overclocking at 100% for the initial test. This build automatically
+uses legacy SuperFX timing for the verified Doom ROM to fix a black-screen stall.
+Very fast aim jumps are capped and sent without a delayed motion backlog.
+
+SUPPORTED FPS ROMS
+Doom (USA)             CRC32 09e85ea6
+Wolfenstein 3-D (USA)   CRC32 6582a8f5
+FPS mode is disabled by default and only activates for these exact revisions.
+Other revisions retain normal input until they have been verified.
+
+CURSOR / PADDLE GAMES
+All v8 profiles remain: Mario Paint, Arkanoid, Lemmings 2, Super Solitaire,
+Vegas Stakes and Might and Magic III. Their setup remains SNES Mouse device,
+Mouse Input = Left Analog Position Tracking, Game Profiles = Automatic.
+Leave FPS Hybrid Controls disabled for those games. Select Clutch stays optional.
+See V8-SETUP.txt for their exact CRCs and setup.
+
+VALIDATION
+All prior serial mouse-packet and Mario Paint/paddle/cursor tests passed.
+New serial-packet tests cover stationary off-center aim, reversal, no backlog,
+walking/running/strafe, button commands, ROM guards and Select reservation.
+Real ROM tests cover gameplay movement/fire, command mappings and motion stop.
+Wolf3D's actual angle remained unchanged over 240 stationary frames.
+Doom's converted movement words were zero while stationary.
+Fresh-boot position checks for all five supplied non-FPS ROMs also passed.
+Windows x64 DLL cross-compiled; final testing on your RetroArch setup is required.
+
+IF NEEDED
+Enable Analog Mouse Diagnostic Logging plus RetroArch logging to file for a
+short reproduction. FPS packets use AM_FPS; build marker fps-hybrid-v9.
+The ZIP includes full modified source and licensing. No ROMs or save states.

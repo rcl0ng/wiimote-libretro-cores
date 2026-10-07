@@ -1,0 +1,1 @@
+These are preserved development sources, patches, tests and historical instructions. Old build numbers, pending-test statements and machine paths are historical. Use the current docs and top-level installation guide for RC2. Retained binaries have not been rebuilt.

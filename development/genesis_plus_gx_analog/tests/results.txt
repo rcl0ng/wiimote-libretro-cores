@@ -1,0 +1,2 @@
+PASS: both polling paths, hybrid Start/menu, independent Justifiers, 1000 stationary-P2 frames, reload/aux, minus no reload, disabled P2, Menacer, dual Phaser, disabled P1, native restore and native lightgun regression.
+PASS: native diagnostic ROM boot/run/reset. Windows game playtest pending.

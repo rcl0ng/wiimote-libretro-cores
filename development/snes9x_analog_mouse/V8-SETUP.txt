@@ -1,0 +1,61 @@
+Snes9x Analog Mouse v8 — automatic game profiles
+
+INSTALL
+Close RetroArch. Back up your existing custom DLL, then replace it with
+snes9x_analog_mouse_libretro.dll from this ZIP in your RetroArch cores folder.
+The filename is unchanged, so your RetroBat core selection still applies.
+The .info file belongs in RetroArch's info folder if needed.
+
+SETTINGS
+Quick Menu > Controls: set the game's mouse port to SNES Mouse.
+Quick Menu > Core Options:
+  Mouse Input = Left Analog (Position Tracking)
+  Analog Mouse Game Profiles = Automatic
+  Analog Mouse Select Clutch = Disabled
+Keep your existing vJoy axes, button mappings, sensitivity 1.0 and deadzone 0.0.
+RetroPad B is mouse left click; RetroPad A is mouse right click.
+Minus remains available for your RetroArch menu hotkey when clutch is disabled.
+Mario Paint Cursor Reference is a legacy option; Automatic now includes it.
+To compare old general tracking, disable both game profiles and that legacy option.
+Save Game Options for each game, then restart content if necessary.
+
+TEST FIRST
+Try Arkanoid: Doh It Again (USA), one player, mouse on SNES port 1.
+Move sharply left/right, hold still, then reverse direction. The paddle should
+reach its legal edge without needing the old reverse-direction unstick motion.
+The game still limits movement to eight pixels per update; v8 retries movement
+that the old conversion lost. It keeps the paddle center under the aim within
+the legal playfield and accounts for paddle width.
+Then try Mario Paint, Lemmings 2 and Super Solitaire.
+
+PROFILE COVERAGE
+Exact ROM CRC32 matches only:
+  Mario Paint Japan/USA          38c9626c (existing v7 behavior)
+  Arkanoid: Doh It Again USA     b50503a0 (first player's gameplay paddle)
+  Lemmings 2 USA                df7200c8 (cursor and changing limits)
+  Super Solitaire USA           c8e80d55 (cursor)
+  Vegas Stakes USA              03a0e935 (active mouse cursor)
+  Might and Magic III USA       8af25e7e (active mouse cursor)
+Other revisions/games use general tracking. Unsupported Arkanoid player-two
+modes retain general input in this first version.
+
+HYBRID
+You can retain a RetroPad on the other SNES port and map the same vJoy device
+to it. Each game determines whether it accepts mouse plus gamepad together.
+This build does not add gamepad commands to games that lack that combination.
+
+VALIDATION
+Linux build and real serial mouse-packet regression tests passed, including
+Mario Paint, optional clutch, native mouse, independent ports and profile guards.
+Fresh-boot tests with all five supplied ROMs passed target-position checks.
+Gameplay checked for Arkanoid, Lemmings 2, Super Solitaire and Might and Magic III;
+Vegas Stakes checked in its title/menu and name-entry cursor screens. Dialogue
+can deliberately stop cursor updates. Lemmings edge scrolling was also checked.
+Windows x64 DLL cross-compiled; it still needs testing in your RetroArch setup.
+
+LOGGING IF NEEDED
+Enable Analog Mouse Diagnostic Logging and RetroArch logging to file for a
+short reproduction. AM_REFERENCE now identifies the game profile, port,
+actual position, requested target, packet and limits. Build marker: game-profiles-v8.
+
+The ZIP includes complete modified source and Snes9x licensing. No ROMs.

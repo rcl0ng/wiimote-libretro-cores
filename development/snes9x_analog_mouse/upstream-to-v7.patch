@@ -1,0 +1,607 @@
+diff --git a/controls.cpp b/controls.cpp
+index e366727..bd5f2cc 100644
+--- a/controls.cpp
++++ b/controls.cpp
+@@ -17,6 +17,9 @@
+ #include "apu/apu.h"
+ #include "snapshot.h"
+ #include "controls.h"
++#ifdef __LIBRETRO__
++#include "libretro/analog_mouse.h"
++#endif
+ #include "crosshairs.h"
+ #include "movie.h"
+ #include "display.h"
+@@ -2767,6 +2770,18 @@ static void do_polling (int mp)
+ 
+ static void UpdatePolledMouse (int i)
+ {
++#ifdef __LIBRETRO__
++    unsigned reference_x = 0, reference_y = 0;
++    if (snes9x_analog_mouse_reference_packet(i - MOUSE0, reference_x, reference_y))
++    {
++        mouse[i - MOUSE0].delta_x = (uint8) reference_x;
++        mouse[i - MOUSE0].delta_y = (uint8) reference_y;
++        // General relative accumulation must not leave a backlog in reference mode.
++        mouse[i - MOUSE0].old_x = mouse[i - MOUSE0].cur_x;
++        mouse[i - MOUSE0].old_y = mouse[i - MOUSE0].cur_y;
++        return;
++    }
++#endif
+ 	int16	j;
+ 
+ 	j = mouse[i - MOUSE0].cur_x - mouse[i - MOUSE0].old_x;
+@@ -2814,6 +2829,13 @@ static void UpdatePolledMouse (int i)
+ 		mouse[i - MOUSE0].delta_y = (uint8) j;
+ 		mouse[i - MOUSE0].old_y = mouse[i - MOUSE0].cur_y;
+ 	}
++#ifdef __LIBRETRO__
++    snes9x_analog_mouse_log_packet(i - MOUSE0,
++        mouse[i - MOUSE0].cur_x, mouse[i - MOUSE0].cur_y,
++        mouse[i - MOUSE0].old_x, mouse[i - MOUSE0].old_y,
++        mouse[i - MOUSE0].delta_x, mouse[i - MOUSE0].delta_y,
++        mouse[i - MOUSE0].buttons);
++#endif
+ }
+ 
+ void S9xSetJoypadLatch (bool latch)
+diff --git a/libretro/analog_mouse.h b/libretro/analog_mouse.h
+new file mode 100644
+index 0000000..d9cda47
+--- /dev/null
++++ b/libretro/analog_mouse.h
+@@ -0,0 +1,38 @@
++#ifndef SNES9X_ANALOG_MOUSE_H
++#define SNES9X_ANALOG_MOUSE_H
++
++#include <stdint.h>
++
++bool snes9x_analog_mouse_reference_packet(int port, unsigned &dx, unsigned &dy);
++
++void snes9x_analog_mouse_log_packet(int port, int cur_x, int cur_y,
++        int old_x, int old_y, unsigned dx, unsigned dy, unsigned buttons);
++
++struct AnalogMouseTracker
++{
++    int last_x, last_y;
++    bool initialized;
++};
++
++/* Convert a change in absolute stick position into mouse movement.
++ * First sample and clutch samples establish an origin without moving.
++ * Never integrate stick deflection as velocity.
++ */
++static inline void analog_mouse_delta(AnalogMouseTracker &tracker,
++        int16_t x, int16_t y, int width, int height, bool clutch,
++        int &dx, int &dy)
++{
++    int px = ((int(x) + 32768) * (width - 1)) / 65535;
++    int py = ((int(y) + 32768) * (height - 1)) / 65535;
++    dx = dy = 0;
++    if (tracker.initialized && !clutch)
++    {
++        dx = px - tracker.last_x;
++        dy = py - tracker.last_y;
++    }
++    tracker.last_x = px;
++    tracker.last_y = py;
++    tracker.initialized = true;
++}
++
++#endif
+diff --git a/libretro/libretro.cpp b/libretro/libretro.cpp
+index 6060767..b4c0dbe 100644
+--- a/libretro/libretro.cpp
++++ b/libretro/libretro.cpp
+@@ -1,5 +1,6 @@
+ #include "libretro.h"
+ #include "libretro_core_options.h"
++#include "analog_mouse.h"
+ 
+ #include "snes9x.h"
+ #include "memmap.h"
+@@ -36,6 +37,14 @@
+ 
+ static int g_screen_gun_width = SNES_WIDTH;
+ static int g_screen_gun_height = SNES_HEIGHT;
++static bool setting_mouse_left_analog = false;
++static bool setting_mouse_diagnostics = false;
++static bool setting_mouse_mario_paint = false;
++static bool setting_mouse_select_clutch = false;
++static bool analog_mouse_clutch[2] = {};
++static unsigned long long analog_mouse_frame = 0;
++static AnalogMouseTracker analog_mouse_trackers[2] = {};
++static int16_t snes_mouse_state[2][2] = {{0}, {0}};
+ 
+ #define RETRO_MEMORY_SNES_BSX_RAM ((1 << 8) | RETRO_MEMORY_SAVE_RAM)
+ #define RETRO_MEMORY_SNES_BSX_PRAM ((2 << 8) | RETRO_MEMORY_SAVE_RAM)
+@@ -67,6 +76,86 @@ char retro_system_directory[4096];
+ char retro_save_directory[4096];
+ 
+ retro_log_printf_t log_cb = NULL;
++/* Mario Paint (Japan/USA, CRC from Ron's tested ROM) uses these WRAM
++ * coordinates and exclusive upper bounds. Observe them; never write game RAM.
++ * Send correction at the game's mouse poll, after its previous movement was applied.
++ */
++static bool mario_paint_fly_screen()
++{
++    // CODE_01A0xx sets these display shadows on Fly Swatter entry;
++    // CODE_01A238 restores 06/66/13 when returning to the editor.
++    return Memory.RAM[0x10e] == 0x66 && Memory.RAM[0x10f] == 0x66 &&
++        Memory.RAM[0x11a] == 0x17;
++}
++static int mario_paint_word(unsigned offset)
++{
++    return int(int16_t(unsigned(Memory.RAM[offset]) |
++        (unsigned(Memory.RAM[offset + 1]) << 8)));
++}
++bool snes9x_analog_mouse_reference_packet(int port, unsigned &dx, unsigned &dy)
++{
++    static unsigned long long status_frame = ~0ULL;
++    if (setting_mouse_diagnostics && log_cb && port == 0 &&
++        (analog_mouse_frame % 60 == 0) && status_frame != analog_mouse_frame)
++    {
++        status_frame = analog_mouse_frame;
++        log_cb(RETRO_LOG_INFO,
++            "AM_PROFILE frame=%llu enabled=%d analog=%d initialized=%d crc=%08x expected=38c9626c cursor=%d,%d bounds=%d,%d,%d,%d\n",
++            analog_mouse_frame, int(setting_mouse_mario_paint), int(setting_mouse_left_analog),
++            int(analog_mouse_trackers[0].initialized), unsigned(Memory.ROMCRC32),
++            mario_paint_word(0x4dc), mario_paint_word(0x4de),
++            mario_paint_word(0x4d4), mario_paint_word(0x4d6),
++            mario_paint_word(0x4d8), mario_paint_word(0x4da));
++    }
++    if (!setting_mouse_mario_paint || !setting_mouse_left_analog || port != 0 ||
++        Memory.ROMCRC32 != 0x38c9626c || !analog_mouse_trackers[0].initialized)
++        return false;
++    int min_x = mario_paint_word(0x4d4), max_x = mario_paint_word(0x4d6);
++    int min_y = mario_paint_word(0x4d8), max_y = mario_paint_word(0x4da);
++    int cur_x = mario_paint_word(0x4dc), cur_y = mario_paint_word(0x4de);
++    // Fly Swatter's CODE_01A54F uses immediate bounds. Editor boundary
++    // words can be zero OR remain populated from the painting screen.
++    // Detect the screen instead of interpreting stale editor limits.
++    if (mario_paint_fly_screen())
++    {
++        min_x = 0x18; max_x = 0xe8;
++        min_y = 0x20; max_y = 0xd0;
++    }
++    if (min_x < -256 || max_x > 512 || min_y < -256 || max_y > 512 ||
++        max_x <= min_x || max_y <= min_y ||
++        cur_x < -256 || cur_x > 512 || cur_y < -256 || cur_y > 512)
++        return false; // Uninitialized or different game state: use general input.
++    int target_x = analog_mouse_trackers[0].last_x;
++    int target_y = analog_mouse_trackers[0].last_y;
++    if (target_x < min_x) target_x = min_x;
++    if (target_x >= max_x) target_x = max_x - 1;
++    if (target_y < min_y) target_y = min_y;
++    if (target_y >= max_y) target_y = max_y - 1;
++    int move_x = analog_mouse_clutch[0] ? 0 : target_x - cur_x;
++    int move_y = analog_mouse_clutch[0] ? 0 : target_y - cur_y;
++    if (move_x < -127) move_x = -127;
++    if (move_x > 127) move_x = 127;
++    if (move_y < -127) move_y = -127;
++    if (move_y > 127) move_y = 127;
++    dx = move_x < 0 ? (128 | -move_x) : move_x;
++    dy = move_y < 0 ? (128 | -move_y) : move_y;
++    if (setting_mouse_diagnostics && log_cb)
++        log_cb(RETRO_LOG_INFO,
++            "AM_REFERENCE frame=%llu cursor=%d,%d target=%d,%d packet=%d,%d bounds=%d,%d,%d,%d select=%d fly=%d\n",
++            analog_mouse_frame, cur_x, cur_y, target_x, target_y, move_x, move_y,
++            min_x, max_x, min_y, max_y, int(analog_mouse_clutch[0]), int(mario_paint_fly_screen()));
++    return true;
++}
++void snes9x_analog_mouse_log_packet(int port, int cur_x, int cur_y,
++        int old_x, int old_y, unsigned dx, unsigned dy, unsigned buttons)
++{
++    if (setting_mouse_diagnostics && setting_mouse_left_analog && log_cb)
++        log_cb(RETRO_LOG_INFO,
++            "AM_PACKET frame=%llu port=%d cur=%d,%d consumed=%d,%d packet=%d,%d buttons=0x%02x\n",
++            analog_mouse_frame, port + 1, cur_x, cur_y, old_x, old_y,
++            (dx & 128) ? -int(dx & 127) : int(dx),
++            (dy & 128) ? -int(dy & 127) : int(dy), buttons);
++}
+ static retro_video_refresh_t video_cb = NULL;
+ static retro_audio_sample_t audio_cb = NULL;
+ static retro_audio_sample_batch_t audio_batch_cb = NULL;
+@@ -308,6 +397,36 @@ static void update_variables(void)
+     char key[256];
+     struct retro_variable var;
+ 
++    var.key = "snes9x_mouse_select_clutch";
++    var.value = NULL;
++    setting_mouse_select_clutch = environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) &&
++        var.value && strcmp(var.value, "enabled") == 0;
++
++    var.key = "snes9x_mouse_mario_paint";
++    var.value = NULL;
++    setting_mouse_mario_paint = environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) &&
++        var.value && !strcmp(var.value, "enabled");
++
++    var.key = "snes9x_mouse_diagnostics";
++    var.value = NULL;
++    bool diagnostics = environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) &&
++        var.value && !strcmp(var.value, "enabled");
++    if (diagnostics != setting_mouse_diagnostics && log_cb)
++        log_cb(RETRO_LOG_INFO, "AM_DIAGNOSTICS %s; build=fly-screen-state-v7\n", diagnostics ? "enabled" : "disabled");
++    setting_mouse_diagnostics = diagnostics;
++
++    var.key = "snes9x_mouse_input";
++    var.value = NULL;
++    bool left_analog = environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) &&
++        var.value && !strcmp(var.value, "left_analog");
++    if (left_analog != setting_mouse_left_analog)
++        memset(analog_mouse_trackers, 0, sizeof(analog_mouse_trackers));
++    setting_mouse_left_analog = left_analog;
++    if (setting_mouse_diagnostics && log_cb)
++        log_cb(RETRO_LOG_INFO, "AM_MODE reference=%d analog=%d rom=%s crc=%08x\n",
++            int(setting_mouse_mario_paint), int(setting_mouse_left_analog),
++            Memory.ROMName, unsigned(Memory.ROMCRC32));
++
+     var.key = "snes9x_hires_blend";
+     var.value = NULL;
+ 
+@@ -771,7 +890,7 @@ void retro_get_system_info(struct retro_system_info *info)
+ {
+     memset(info,0,sizeof(retro_system_info));
+ 
+-    info->library_name = "Snes9x";
++    info->library_name = "Snes9x Analog Mouse";
+ #ifndef GIT_VERSION
+ #define GIT_VERSION ""
+ #endif
+@@ -848,6 +967,8 @@ unsigned retro_api_version()
+ 
+ void retro_reset()
+ {
++    memset(analog_mouse_trackers, 0, sizeof(analog_mouse_trackers));
++    memset(snes_mouse_state, 0, sizeof(snes_mouse_state));
+     S9xSoftReset();
+ }
+ 
+@@ -868,6 +989,8 @@ void retro_set_controller_port_device(unsigned port, unsigned device)
+                 snes_devices[port] = RETRO_DEVICE_JOYPAD_MULTITAP;
+                 break;
+             case RETRO_DEVICE_MOUSE:
++                if (port < 2)
++                    analog_mouse_trackers[port].initialized = false;
+                 S9xSetController(port, CTL_MOUSE, port, 0, 0, 0);
+                 snes_devices[port] = RETRO_DEVICE_MOUSE;
+                 break;
+@@ -1098,6 +1221,8 @@ static bool8 is_SufamiTurbo_Cart (const uint8 *data, uint32 size)
+ 
+ bool retro_load_game(const struct retro_game_info *game)
+ {
++    memset(analog_mouse_trackers, 0, sizeof(analog_mouse_trackers));
++    memset(snes_mouse_state, 0, sizeof(snes_mouse_state));
+     init_descriptors();
+ 
+     update_variables();
+@@ -1513,7 +1638,6 @@ static void map_buttons()
+ 
+ }
+ 
+-static int16_t snes_mouse_state[2][2] = {{0}, {0}};
+ static bool snes_superscope_turbo_latch = false;
+ 
+ static void input_report_gun_position( unsigned port, int s9xinput )
+@@ -1680,6 +1804,7 @@ static void input_handle_pointer_lightgun( unsigned port, unsigned gun_device, i
+ 
+ static void report_buttons()
+ {
++    ++analog_mouse_frame;
+     int offset = snes_devices[0] == RETRO_DEVICE_JOYPAD_MULTITAP ? 4 : 1;
+     int _x, _y;
+ 
+@@ -1699,13 +1824,44 @@ static void report_buttons()
+                 break;
+ 
+             case RETRO_DEVICE_MOUSE:
+-                _x = input_state_cb(port, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_X);
+-                _y = input_state_cb(port, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_Y);
++                if (setting_mouse_left_analog)
++                {
++                    int16_t raw_x = input_state_cb(port, RETRO_DEVICE_ANALOG,
++                        RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_X);
++                    int16_t raw_y = input_state_cb(port, RETRO_DEVICE_ANALOG,
++                        RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_Y);
++                    bool clutch = setting_mouse_select_clutch && input_state_cb(port, RETRO_DEVICE_JOYPAD, 0,
++                        RETRO_DEVICE_ID_JOYPAD_SELECT) != 0;
++                    analog_mouse_clutch[port] = clutch;
++                    analog_mouse_delta(analog_mouse_trackers[port], raw_x, raw_y,
++                        g_screen_gun_width, g_screen_gun_height, clutch, _x, _y);
++                    if (setting_mouse_diagnostics && log_cb)
++                        log_cb(RETRO_LOG_INFO,
++                            "AM_INPUT frame=%llu port=%d raw=%d,%d position=%d,%d delta=%d,%d target=%d,%d select=%d size=%d,%d\n",
++                            analog_mouse_frame, port + 1, int(raw_x), int(raw_y),
++                            analog_mouse_trackers[port].last_x, analog_mouse_trackers[port].last_y,
++                            _x, _y, int(int16_t(snes_mouse_state[port][0] + _x)),
++                            int(int16_t(snes_mouse_state[port][1] + _y)), int(clutch),
++                            g_screen_gun_width, g_screen_gun_height);
++                }
++                else
++                {
++                    _x = input_state_cb(port, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_X);
++                    _y = input_state_cb(port, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_Y);
++                }
+                 snes_mouse_state[port][0] += _x;
+                 snes_mouse_state[port][1] += _y;
+                 S9xReportPointer(BTN_POINTER + port, snes_mouse_state[port][0], snes_mouse_state[port][1]);
+-                for (int i = MOUSE_LEFT; i <= MOUSE_LAST; i++)
+-                    S9xReportButton(MAKE_BUTTON(port + 1, i), input_state_cb(port, RETRO_DEVICE_MOUSE, 0, i));
++                if (setting_mouse_left_analog)
++                {
++                    S9xReportButton(MAKE_BUTTON(port + 1, MOUSE_LEFT),
++                        input_state_cb(port, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B));
++                    S9xReportButton(MAKE_BUTTON(port + 1, MOUSE_RIGHT),
++                        input_state_cb(port, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A));
++                }
++                else
++                    for (int i = MOUSE_LEFT; i <= MOUSE_LAST; i++)
++                        S9xReportButton(MAKE_BUTTON(port + 1, i), input_state_cb(port, RETRO_DEVICE_MOUSE, 0, i));
+                 break;
+ 
+             case RETRO_DEVICE_LIGHTGUN_SUPER_SCOPE:
+diff --git a/libretro/libretro_core_options.h b/libretro/libretro_core_options.h
+index e3b9f2a..dc04cdc 100644
+--- a/libretro/libretro_core_options.h
++++ b/libretro/libretro_core_options.h
+@@ -49,6 +49,50 @@ extern "C" {
+  *   frontend language definition */
+ 
+ struct retro_core_option_definition option_defs_us[] = {
++   {
++      "snes9x_mouse_select_clutch",
++      "Analog Mouse Select Clutch",
++      "Optional RetroPad Select (Wiimote minus) clutch. Disabled leaves Select available for frontend hotkeys. Enabled pauses Mario Paint reference tracking while held; with general position tracking, hold it and point at the game's current cursor, then release to realign.",
++      {
++         { "disabled", "Disabled" },
++         { "enabled", "Enabled" },
++         { NULL, NULL },
++      },
++      "disabled"
++   },
++   {
++      "snes9x_mouse_mario_paint",
++      "Mario Paint Cursor Reference",
++      "Experimental absolute tracking for the original Mario Paint Japan/USA ROM (CRC32 38c9626c). Reads the game's hand position and movement bounds to prevent drift from discarded mouse movement. Requires Left Analog Position Tracking on mouse port 1. Other ROMs retain general mouse tracking. Save as a game option. When Analog Mouse Select Clutch is enabled, Select pauses tracking while held; releasing returns to the absolute target.",
++      {
++         { "disabled", "Disabled" },
++         { "enabled", "Enabled" },
++         { NULL, NULL },
++      },
++      "disabled"
++   },
++   {
++      "snes9x_mouse_diagnostics",
++      "Analog Mouse Diagnostic Logging",
++      "Record incoming axes, Select/clutch, generated movement and SNES mouse packets in the frontend log. Enable only for a short test with RetroArch logging to file enabled.",
++      {
++         { "disabled", "Disabled" },
++         { "enabled", "Enabled" },
++         { NULL, NULL },
++      },
++      "disabled"
++   },
++   {
++      "snes9x_mouse_input",
++      "Mouse Input",
++      "Choose native mouse movement or position tracking from the left analog axes. Position tracking uses RetroPad B for left click, A for right click, and an optional Select clutch controlled by Analog Mouse Select Clutch. Games still apply their own mouse speed and screen limits.",
++      {
++         { "mouse", "Mouse" },
++         { "left_analog", "Left Analog (Position Tracking)" },
++         { NULL, NULL },
++      },
++      "mouse"
++   },
+ 
+    /* These variable names and possible values constitute an ABI with ZMZ (ZSNES Libretro player).
+     * Changing "Show layer 1" is fine, but don't change "layer_1"/etc or the possible values ("Yes|No").
+diff --git a/tests/analog_mouse_test.cpp b/tests/analog_mouse_test.cpp
+new file mode 100644
+index 0000000..295f71a
+--- /dev/null
++++ b/tests/analog_mouse_test.cpp
+@@ -0,0 +1,181 @@
++#include "../libretro/libretro.cpp"
++#undef NDEBUG
++#include <assert.h>
++#include <stdarg.h>
++#include <string>
++static std::string captured_log;
++static void capture_log(enum retro_log_level, const char *fmt, ...)
++{
++    char line[1024]; va_list args; va_start(args,fmt);
++    vsnprintf(line,sizeof(line),fmt,args); va_end(args); captured_log += line;
++}
++static int16_t axes[2][2];
++static unsigned buttons[2];
++static int16_t fake_input(unsigned port, unsigned device, unsigned index, unsigned id)
++{
++    assert(port < 2);
++    if (device == RETRO_DEVICE_ANALOG)
++    {
++        assert(index == RETRO_DEVICE_INDEX_ANALOG_LEFT && id < 2);
++        return axes[port][id];
++    }
++    if (device == RETRO_DEVICE_JOYPAD)
++        return !!(buttons[port] & (1u << id));
++    if (device == RETRO_DEVICE_MOUSE)
++    {
++        if (id == RETRO_DEVICE_ID_MOUSE_X) return 12;
++        if (id == RETRO_DEVICE_ID_MOUSE_Y) return -8;
++        if (id == RETRO_DEVICE_ID_MOUSE_LEFT) return 1;
++    }
++    return 0;
++}
++static uint32_t packet(int port, bool latch = true)
++{
++    uint32_t result = 0;
++    if (latch)
++    {
++        S9xSetJoypadLatch(true);
++        S9xSetJoypadLatch(false);
++    }
++    for (int n=0; n<32; n++) result = (result << 1) | (S9xReadJOYSERn(port) & 1);
++    return result;
++}
++static int dx(uint32_t p) { unsigned b=p&255; return b&128 ? -int(b&127) : int(b); }
++static int dy(uint32_t p) { unsigned b=(p>>8)&255; return b&128 ? -int(b&127) : int(b); }
++static void ram_word(unsigned offset, int value)
++{ Memory.RAM[offset]=value&255; Memory.RAM[offset+1]=(value>>8)&255; }
++static void fixture(bool analog)
++{
++    setting_mouse_select_clutch=true;
++    setting_mouse_mario_paint=false; memset(analog_mouse_clutch,0,sizeof(analog_mouse_clutch));
++    memset(axes,0,sizeof(axes)); memset(buttons,0,sizeof(buttons));
++    memset(analog_mouse_trackers,0,sizeof(analog_mouse_trackers));
++    memset(snes_mouse_state,0,sizeof(snes_mouse_state));
++    S9xUnmapAllControls(); map_buttons();
++    Settings.MouseMaster = TRUE;
++    S9xSetController(0,CTL_MOUSE,0,0,0,0);
++    S9xSetController(1,CTL_MOUSE,1,0,0,0);
++    S9xControlsSoftReset();
++    snes_devices[0]=snes_devices[1]=RETRO_DEVICE_MOUSE;
++    setting_mouse_left_analog=analog;
++    g_screen_gun_width=256; g_screen_gun_height=224;
++    input_state_cb=fake_input;
++}
++int main()
++{
++    fixture(true);
++    report_buttons();
++    assert(dx(packet(0))==0 && dy(packet(1, false))==0); // First sample causes no jump.
++    axes[0][0]=32767; axes[0][1]=-32768;
++    axes[1][0]=-32768;
++    report_buttons();
++    uint32_t p=packet(0), q=packet(1, false);
++    assert(dx(p)==127 && dy(p)==-111);
++    assert(dx(q)==-127 && dy(q)==0); // Independent second mouse.
++    p=packet(0); assert(dx(p)==1 && dy(p)==0); // Remaining one unit delivered.
++    for(int n=0;n<120;n++)
++    {
++        report_buttons(); p=packet(0); q=packet(1, false);
++        assert(dx(p)==0 && dy(p)==0 && dx(q)==0 && dy(q)==0);
++    }
++    buttons[0]=1u<<RETRO_DEVICE_ID_JOYPAD_SELECT;
++    axes[0][0]=-32768; axes[0][1]=32767;
++    report_buttons(); p=packet(0); assert(dx(p)==0 && dy(p)==0); // Clutch.
++    buttons[0]=0; report_buttons(); p=packet(0);
++    assert(dx(p)==0 && dy(p)==0); // Release has no jump.
++    buttons[0]=(1u<<RETRO_DEVICE_ID_JOYPAD_B)|(1u<<RETRO_DEVICE_ID_JOYPAD_A);
++    report_buttons(); p=packet(0); assert(((p>>16)&0xc0)==0xc0);
++    buttons[0]=0; report_buttons(); p=packet(0); assert(((p>>16)&0xc0)==0);
++    fixture(false); report_buttons(); p=packet(0);
++    assert(dx(p)==12 && dy(p)==-8 && ((p>>16)&0xc0)==0x40);
++    fixture(true);
++    setting_mouse_diagnostics = true; log_cb = capture_log;
++    report_buttons(); packet(0); packet(1, false); captured_log.clear();
++    axes[0][0]=32767; axes[0][1]=-32768;
++    report_buttons(); p=packet(0); packet(1, false);
++    assert(dx(p)==127 && dy(p)==-111);
++    assert(captured_log.find("raw=32767,-32768")!=std::string::npos);
++    assert(captured_log.find("delta=128,-111")!=std::string::npos);
++    assert(captured_log.find("packet=127,-111")!=std::string::npos);
++    captured_log.clear(); buttons[0]=1u<<RETRO_DEVICE_ID_JOYPAD_SELECT;
++    report_buttons(); packet(0);
++    assert(captured_log.find("select=1")!=std::string::npos);
++    setting_mouse_diagnostics=false; captured_log.clear();
++    report_buttons(); packet(0); assert(captured_log.empty()); log_cb=NULL;
++    fixture(true); Memory.ROMCRC32=0x38c9626c;
++    memset(Memory.RAM,0,sizeof(Memory.RAM));
++    ram_word(0x4d4,-16); ram_word(0x4d6,272);
++    ram_word(0x4d8,8); ram_word(0x4da,216);
++    ram_word(0x4dc,180); ram_word(0x4de,170);
++    report_buttons(); packet(0); // Establish relative origin.
++    axes[0][1]=32767; report_buttons(); p=packet(0);
++    assert(dy(p)==112 && 170+dy(p)>=216); // Game rejects this overshoot.
++    report_buttons(); p=packet(0); assert(dy(p)==0); // Lost movement is not retried.
++    setting_mouse_mario_paint=true;
++    report_buttons(); p=packet(0);
++    assert(dx(p)==-53 && dy(p)==45); // Correct actual game cursor to 127,215.
++    ram_word(0x4dc,180+dx(p)); ram_word(0x4de,170+dy(p));
++    for(int n=0;n<120;n++)
++    { report_buttons(); p=packet(0); assert(dx(p)==0 && dy(p)==0); }
++    // Game moves/recenters cursor while Wiimote remains at the same target.
++    ram_word(0x4dc,20); axes[0][0]=32767;
++    report_buttons(); p=packet(0); assert(dx(p)==127 && dy(p)==0);
++    ram_word(0x4dc,20+dx(p)); report_buttons(); p=packet(0); assert(dx(p)==108);
++    ram_word(0x4dc,147+dx(p)); report_buttons(); p=packet(0); assert(dx(p)==0);
++    // New tighter game bounds: clamp to the last accepted coordinate.
++    ram_word(0x4d6,200); ram_word(0x4dc,190);
++    report_buttons(); p=packet(0); assert(dx(p)==9);
++    buttons[0]=1u<<RETRO_DEVICE_ID_JOYPAD_SELECT;
++    report_buttons(); p=packet(0); assert(dx(p)==0 && dy(p)==0);
++    // Fly Swatter leaves editor bounds zero and rejects moves outside
++    // [24,232) x [32,208). Holding left must recover a stranded x=37.
++    buttons[0]=0;
++    ram_word(0x4d4,0); ram_word(0x4d6,0);
++    ram_word(0x4d8,0); ram_word(0x4da,0);
++    Memory.RAM[0x10e]=0x66; Memory.RAM[0x10f]=0x66; Memory.RAM[0x11a]=0x17;
++    ram_word(0x4dc,37); ram_word(0x4de,73);
++    axes[0][0]=-32767; axes[0][1]=0;
++    report_buttons(); p=packet(0); assert(dx(p)==-13 && dy(p)==38);
++    ram_word(0x4dc,24); ram_word(0x4de,111);
++    for(int n=0;n<120;n++)
++    { report_buttons(); p=packet(0); assert(dx(p)==0 && dy(p)==0); }
++    axes[0][0]=32767; axes[0][1]=32767;
++    for(int n=0;n<4;n++)
++    {
++        report_buttons(); p=packet(0);
++        int x=mario_paint_word(0x4dc)+dx(p),y=mario_paint_word(0x4de)+dy(p);
++        assert(x>=24 && x<232 && y>=32 && y<208);
++        ram_word(0x4dc,x); ram_word(0x4de,y);
++    }
++    assert(mario_paint_word(0x4dc)==231 && mario_paint_word(0x4de)==207);
++    // Re-entering Fly Swatter after painting leaves editor limits populated.
++    ram_word(0x4d4,-16); ram_word(0x4d6,272);
++    ram_word(0x4d8,8); ram_word(0x4da,216);
++    ram_word(0x4dc,195); ram_word(0x4de,89);
++    axes[0][1]=-6388;
++    report_buttons(); p=packet(0); assert(dx(p)==36 && dy(p)==0);
++    ram_word(0x4dc,231); report_buttons(); p=packet(0); assert(dx(p)==0);
++    // Returning to the editor restores its limits even at the same aim.
++    Memory.RAM[0x10e]=0x06; Memory.RAM[0x11a]=0x13;
++    report_buttons(); p=packet(0); assert(dx(p)==24);
++    Memory.RAM[0x10e]=0x66; Memory.RAM[0x11a]=0x17;
++    // Disabled clutch ignores Select in reference and general mouse modes.
++    setting_mouse_select_clutch=false;
++    buttons[0]=1u<<RETRO_DEVICE_ID_JOYPAD_SELECT;
++    ram_word(0x4dc,200); report_buttons(); p=packet(0);
++    assert(dx(p)==31 && !analog_mouse_clutch[0]);
++    setting_mouse_mario_paint=false;
++    axes[0][0]=0; report_buttons(); p=packet(0);
++    assert(dx(p)==-127 && !analog_mouse_clutch[0]);
++    setting_mouse_mario_paint=true;
++    Memory.RAM[0x10e]=0x06; Memory.RAM[0x11a]=0x13;
++    // Other ROMs and invalid/uninitialized boundaries cannot invoke the profile.
++    unsigned ux=0,uy=0;
++    Memory.ROMCRC32=0; assert(!snes9x_analog_mouse_reference_packet(0,ux,uy));
++    Memory.ROMCRC32=0x38c9626c; ram_word(0x4d4,-16); ram_word(0x4d6,-16);
++    assert(!snes9x_analog_mouse_reference_packet(0,ux,uy));
++    assert(!snes9x_analog_mouse_reference_packet(1,ux,uy));
++    puts("PASS: Mario Paint rejected-overshoot regression, actual cursor recovery, stationary target, game recentering, exclusive bounds, clutch, ROM/port guards");
++    puts("PASS: diagnostic values, Select detection, logging disabled; real SNES mouse packets, first sample, 127-unit limit, bounded backlog, stationary aim, independent ports, clutch, clicks, native mouse");
++    return 0;
++}
+diff --git a/tests/run_analog_mouse_test.py b/tests/run_analog_mouse_test.py
+new file mode 100644
+index 0000000..8ac6312
+--- /dev/null
++++ b/tests/run_analog_mouse_test.py
+@@ -0,0 +1,17 @@
++#!/usr/bin/env python3
++from pathlib import Path
++import os,shlex,subprocess,tempfile
++os.chdir(Path(__file__).resolve().parent.parent/'libretro')
++subprocess.run(['make','-j4','LTO='],check=True)
++lines=subprocess.check_output(['make','-B','-n','LTO='],text=True).splitlines()
++compile_line=next(l for l in lines if ' -c ' in l and '../libretro/libretro.cpp' in l)
++link=shlex.split(next(l for l in reversed(lines) if ' -o snes9x_libretro.so ' in l))
++with tempfile.TemporaryDirectory() as d:
++    obj=str(Path(d)/'test.o');exe=str(Path(d)/'test')
++    args=[a for a in shlex.split(compile_line) if a!='-DNDEBUG']
++    args[args.index('-o../libretro/libretro.o')]='-o'+obj
++    args[args.index('../libretro/libretro.cpp')]='../tests/analog_mouse_test.cpp'
++    subprocess.run(args,check=True)
++    objects=[a for a in link if a.endswith('.o') and a!='../libretro/libretro.o']
++    subprocess.run(['g++','-o',exe,obj,*objects,'-lm'],check=True)
++    subprocess.run([exe],check=True)

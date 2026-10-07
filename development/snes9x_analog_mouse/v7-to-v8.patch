@@ -1,0 +1,257 @@
+--- a/libretro/libretro.cpp
++++ b/libretro/libretro.cpp
+@@ -1,6 +1,7 @@
+ #include "libretro.h"
+ #include "libretro_core_options.h"
+ #include "analog_mouse.h"
++#include "analog_mouse_profiles.h"
+ 
+ #include "snes9x.h"
+ #include "memmap.h"
+@@ -40,6 +41,7 @@
+ static bool setting_mouse_left_analog = false;
+ static bool setting_mouse_diagnostics = false;
+ static bool setting_mouse_mario_paint = false;
++static bool setting_mouse_game_profiles = true;
+ static bool setting_mouse_select_clutch = false;
+ static bool analog_mouse_clutch[2] = {};
+ static unsigned long long analog_mouse_frame = 0;
+@@ -94,56 +96,43 @@
+ }
+ bool snes9x_analog_mouse_reference_packet(int port, unsigned &dx, unsigned &dy)
+ {
+-    static unsigned long long status_frame = ~0ULL;
+-    if (setting_mouse_diagnostics && log_cb && port == 0 &&
+-        (analog_mouse_frame % 60 == 0) && status_frame != analog_mouse_frame)
+-    {
+-        status_frame = analog_mouse_frame;
+-        log_cb(RETRO_LOG_INFO,
+-            "AM_PROFILE frame=%llu enabled=%d analog=%d initialized=%d crc=%08x expected=38c9626c cursor=%d,%d bounds=%d,%d,%d,%d\n",
+-            analog_mouse_frame, int(setting_mouse_mario_paint), int(setting_mouse_left_analog),
+-            int(analog_mouse_trackers[0].initialized), unsigned(Memory.ROMCRC32),
+-            mario_paint_word(0x4dc), mario_paint_word(0x4de),
+-            mario_paint_word(0x4d4), mario_paint_word(0x4d6),
+-            mario_paint_word(0x4d8), mario_paint_word(0x4da));
+-    }
+-    if (!setting_mouse_mario_paint || !setting_mouse_left_analog || port != 0 ||
+-        Memory.ROMCRC32 != 0x38c9626c || !analog_mouse_trackers[0].initialized)
++    if (!setting_mouse_left_analog || port < 0 || port > 1 ||
++        !analog_mouse_trackers[port].initialized)
+         return false;
+-    int min_x = mario_paint_word(0x4d4), max_x = mario_paint_word(0x4d6);
+-    int min_y = mario_paint_word(0x4d8), max_y = mario_paint_word(0x4da);
+-    int cur_x = mario_paint_word(0x4dc), cur_y = mario_paint_word(0x4de);
+-    // Fly Swatter's CODE_01A54F uses immediate bounds. Editor boundary
+-    // words can be zero OR remain populated from the painting screen.
+-    // Detect the screen instead of interpreting stale editor limits.
+-    if (mario_paint_fly_screen())
+-    {
+-        min_x = 0x18; max_x = 0xe8;
+-        min_y = 0x20; max_y = 0xd0;
+-    }
+-    if (min_x < -256 || max_x > 512 || min_y < -256 || max_y > 512 ||
+-        max_x <= min_x || max_y <= min_y ||
+-        cur_x < -256 || cur_x > 512 || cur_y < -256 || cur_y > 512)
+-        return false; // Uninitialized or different game state: use general input.
+-    int target_x = analog_mouse_trackers[0].last_x;
+-    int target_y = analog_mouse_trackers[0].last_y;
+-    if (target_x < min_x) target_x = min_x;
+-    if (target_x >= max_x) target_x = max_x - 1;
+-    if (target_y < min_y) target_y = min_y;
+-    if (target_y >= max_y) target_y = max_y - 1;
+-    int move_x = analog_mouse_clutch[0] ? 0 : target_x - cur_x;
+-    int move_y = analog_mouse_clutch[0] ? 0 : target_y - cur_y;
+-    if (move_x < -127) move_x = -127;
+-    if (move_x > 127) move_x = 127;
+-    if (move_y < -127) move_y = -127;
+-    if (move_y > 127) move_y = 127;
++    AnalogMouseReference r;
++    bool fly = false;
++    if (port == 0 && Memory.ROMCRC32 == 0x38c9626c &&
++        (setting_mouse_mario_paint || setting_mouse_game_profiles))
++    {
++        r = { "mario_paint", mario_paint_word(0x4dc), mario_paint_word(0x4de),
++            mario_paint_word(0x4d4), mario_paint_word(0x4d6) - 1,
++            mario_paint_word(0x4d8), mario_paint_word(0x4da) - 1,
++            0, 0, 127, false };
++        fly = mario_paint_fly_screen();
++        if (fly)
++        {
++            r.min_x = 24; r.max_x = 231;
++            r.min_y = 32; r.max_y = 207;
++        }
++        if (r.min_x < -256 || r.max_x >= 512 || r.min_y < -256 || r.max_y >= 512 ||
++            r.max_x < r.min_x || r.max_y < r.min_y ||
++            r.x < -256 || r.x > 512 || r.y < -256 || r.y > 512)
++            return false;
++    }
++    else if (!setting_mouse_game_profiles ||
++        !analog_mouse_game_reference(Memory.RAM, Memory.ROMCRC32, port, r))
++        return false;
++    int target_x, target_y, move_x, move_y;
++    analog_mouse_reference_delta(r, analog_mouse_trackers[port].last_x,
++        analog_mouse_trackers[port].last_y, analog_mouse_clutch[port],
++        target_x, target_y, move_x, move_y);
+     dx = move_x < 0 ? (128 | -move_x) : move_x;
+     dy = move_y < 0 ? (128 | -move_y) : move_y;
+     if (setting_mouse_diagnostics && log_cb)
+         log_cb(RETRO_LOG_INFO,
+-            "AM_REFERENCE frame=%llu cursor=%d,%d target=%d,%d packet=%d,%d bounds=%d,%d,%d,%d select=%d fly=%d\n",
+-            analog_mouse_frame, cur_x, cur_y, target_x, target_y, move_x, move_y,
+-            min_x, max_x, min_y, max_y, int(analog_mouse_clutch[0]), int(mario_paint_fly_screen()));
++            "AM_REFERENCE frame=%llu profile=%s port=%d cursor=%d,%d target=%d,%d packet=%d,%d bounds=%d,%d,%d,%d select=%d fly=%d\n",
++            analog_mouse_frame, r.name, port + 1, r.x, r.y, target_x, target_y, move_x, move_y,
++            r.min_x, r.max_x, r.min_y, r.max_y, int(analog_mouse_clutch[port]), int(fly));
+     return true;
+ }
+ void snes9x_analog_mouse_log_packet(int port, int cur_x, int cur_y,
+@@ -397,6 +386,11 @@
+     char key[256];
+     struct retro_variable var;
+ 
++    var.key = "snes9x_mouse_game_profiles";
++    var.value = NULL;
++    setting_mouse_game_profiles = !(environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) &&
++        var.value && !strcmp(var.value, "disabled"));
++
+     var.key = "snes9x_mouse_select_clutch";
+     var.value = NULL;
+     setting_mouse_select_clutch = environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) &&
+@@ -412,7 +406,7 @@
+     bool diagnostics = environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) &&
+         var.value && !strcmp(var.value, "enabled");
+     if (diagnostics != setting_mouse_diagnostics && log_cb)
+-        log_cb(RETRO_LOG_INFO, "AM_DIAGNOSTICS %s; build=fly-screen-state-v7\n", diagnostics ? "enabled" : "disabled");
++        log_cb(RETRO_LOG_INFO, "AM_DIAGNOSTICS %s; build=game-profiles-v8\n", diagnostics ? "enabled" : "disabled");
+     setting_mouse_diagnostics = diagnostics;
+ 
+     var.key = "snes9x_mouse_input";
+@@ -423,8 +417,8 @@
+         memset(analog_mouse_trackers, 0, sizeof(analog_mouse_trackers));
+     setting_mouse_left_analog = left_analog;
+     if (setting_mouse_diagnostics && log_cb)
+-        log_cb(RETRO_LOG_INFO, "AM_MODE reference=%d analog=%d rom=%s crc=%08x\n",
+-            int(setting_mouse_mario_paint), int(setting_mouse_left_analog),
++        log_cb(RETRO_LOG_INFO, "AM_MODE profiles=%d legacy_mp=%d analog=%d rom=%s crc=%08x\n",
++            int(setting_mouse_game_profiles), int(setting_mouse_mario_paint), int(setting_mouse_left_analog),
+             Memory.ROMName, unsigned(Memory.ROMCRC32));
+ 
+     var.key = "snes9x_hires_blend";
+@@ -894,7 +888,7 @@
+ #ifndef GIT_VERSION
+ #define GIT_VERSION ""
+ #endif
+-    info->library_version = VERSION GIT_VERSION;
++    info->library_version = VERSION GIT_VERSION " AM v8";
+     info->valid_extensions = "smc|sfc|swc|fig|bs";
+     info->need_fullpath = false;
+     info->block_extract = false;
+--- a/libretro/libretro_core_options.h
++++ b/libretro/libretro_core_options.h
+@@ -59,6 +59,17 @@
+          { NULL, NULL },
+       },
+       "disabled"
++   },
++   {
++      "snes9x_mouse_game_profiles",
++      "Analog Mouse Game Profiles",
++      "Automatically correct position tracking using verified game coordinates. Supports exact tested ROM revisions of Mario Paint, Arkanoid, Lemmings 2, Super Solitaire, Vegas Stakes and Might and Magic III. Other games use general tracking. Requires Left Analog Position Tracking. Reads game state without changing RAM. Disable to compare general tracking.",
++      {
++         { "enabled", "Automatic" },
++         { "disabled", "Disabled" },
++         { NULL, NULL },
++      },
++      "enabled"
+    },
+    {
+       "snes9x_mouse_mario_paint",
+--- /dev/null
++++ b/libretro/analog_mouse_profiles.h
+@@ -0,0 +1,86 @@
++#ifndef SNES9X_ANALOG_MOUSE_PROFILES_H
++#define SNES9X_ANALOG_MOUSE_PROFILES_H
++
++// Read-only game observations. Bounds are inclusive, in the game's coordinates.
++// Match exact ROM CRCs: an unverified revision must never use guessed RAM addresses.
++struct AnalogMouseReference
++{
++    const char *name;
++    int x, y, min_x, max_x, min_y, max_y;
++    int hotspot_x, hotspot_y;
++    int packet_limit;
++    bool paddle;
++};
++
++static inline int am_word(const unsigned char *ram, unsigned a)
++{
++    return int(short(unsigned(ram[a]) | (unsigned(ram[a + 1]) << 8)));
++}
++
++static inline bool analog_mouse_game_reference(const unsigned char *ram,
++        unsigned crc, int port, AnalogMouseReference &r)
++{
++    r = { "", 0, 0, 0, 255, 0, 223, 0, 0, 127, false };
++    switch (crc)
++    {
++    case 0xb50503a0: // Arkanoid: Doh It Again (USA), first player's paddle.
++        if (port != 0 || ram[0x442] != 0xff || ram[0x46e] != 1 ||
++            ram[0x472] != 1 || ram[0x447] < 8 || ram[0x447] > 64)
++            return false;
++        r.name = "arkanoid";
++        r.x = ram[0x44f]; r.y = 0;
++        r.min_x = 16; r.max_x = 175 - ram[0x447];
++        r.hotspot_x = ram[0x447] / 2;
++        r.paddle = true;
++        // The game caps its signed movement at +/-8. Larger packets do not
++        // move faster, and very large positive values can wrap its arithmetic.
++        r.packet_limit = 8;
++        break;
++    case 0xdf7200c8: // Lemmings 2 (USA): screen cursor, not world coordinates.
++        if (port != 0) return false;
++        r.name = "lemmings2";
++        r.x = ram[0xc34]; r.y = ram[0xc35];
++        r.min_x = ram[0x1025]; r.max_x = ram[0x1027];
++        r.min_y = ram[0x1026]; r.max_y = ram[0x1028];
++        break;
++    case 0xc8e80d55: // Super Solitaire (USA, multilingual).
++        if (port != 0) return false;
++        r.name = "super_solitaire";
++        r.x = ram[0x388]; r.y = ram[0x389];
++        break;
++    case 0x03a0e935: // Vegas Stakes (USA): active mouse port is a game setting.
++        if (am_word(ram, 0x11cb) == 0 || port != (am_word(ram, 0x114d) ? 1 : 0))
++            return false;
++        r.name = "vegas_stakes";
++        r.x = am_word(ram, 0x1147); r.y = am_word(ram, 0x1149);
++        r.max_x = 256; r.max_y = 240;
++        break;
++    case 0x8af25e7e: // Might and Magic III (USA): mouse index 0/1, FF absent.
++        if (ram[0x1c79] > 1 || port != ram[0x1c79]) return false;
++        r.name = "might_and_magic3";
++        r.x = ram[0x1c7a]; r.y = ram[0x1c7b];
++        r.min_x = 6; r.max_x = 244; r.max_y = 214;
++        break;
++    default:
++        return false;
++    }
++    return r.min_x < r.max_x && r.min_y < r.max_y &&
++        r.x >= r.min_x && r.x <= r.max_x &&
++        (r.paddle || (r.y >= r.min_y && r.y <= r.max_y));
++}
++
++static inline int analog_mouse_clamp(int v, int lo, int hi)
++{
++    return v < lo ? lo : (v > hi ? hi : v);
++}
++
++static inline void analog_mouse_reference_delta(const AnalogMouseReference &r,
++        int aim_x, int aim_y, bool clutch, int &target_x, int &target_y,
++        int &move_x, int &move_y)
++{
++    target_x = analog_mouse_clamp(aim_x - r.hotspot_x, r.min_x, r.max_x);
++    target_y = r.paddle ? r.y : analog_mouse_clamp(aim_y - r.hotspot_y, r.min_y, r.max_y);
++    move_x = clutch ? 0 : analog_mouse_clamp(target_x - r.x, -r.packet_limit, r.packet_limit);
++    move_y = clutch || r.paddle ? 0 : analog_mouse_clamp(target_y - r.y, -r.packet_limit, r.packet_limit);
++}
++#endif

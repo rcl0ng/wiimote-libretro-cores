@@ -1,0 +1,1 @@
+PASS: both polling settings, pre-content device normalization, independent GunCon/Justifier, 1000 held-P2 frames, reload/aux/start, NTSC/PAL/crop endpoints, native restore and compatibility profiles.

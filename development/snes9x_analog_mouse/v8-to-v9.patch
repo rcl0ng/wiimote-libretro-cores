@@ -1,0 +1,284 @@
+--- a/libretro/libretro.cpp
++++ b/libretro/libretro.cpp
+@@ -39,9 +39,28 @@
+ static int g_screen_gun_width = SNES_WIDTH;
+ static int g_screen_gun_height = SNES_HEIGHT;
+ static bool setting_mouse_left_analog = false;
++static bool setting_mouse_analog_choice = false;
+ static bool setting_mouse_diagnostics = false;
+ static bool setting_mouse_mario_paint = false;
+ static bool setting_mouse_game_profiles = true;
++static bool setting_fps_hybrid = false;
++static int setting_fps_gain = 1;
++static int fps_motion_x[2] = {}, fps_motion_y[2] = {};
++static uint16_t fps_doom_buttons = 0;
++bool snes9x_fps_doom_overlay = false;
++static void configure_fps_ports();
++static bool fps_game() { return setting_fps_hybrid &&
++    (Memory.ROMCRC32 == 0x09e85ea6 || Memory.ROMCRC32 == 0x6582a8f5); }
++// Doom USA stores converted input in WRAM 06f4. Blend commands at that write,
++// rather than periodically changing player state or patching the ROM.
++uint16_t snes9x_fps_input_word(uint32_t address, uint16_t word)
++{
++    bool mirror = (address & 0x40e000) == 0 || (address & 0xffe000) == 0x7e0000;
++    if (mirror && (address & 0xffff) == 0x06f4 && snes9x_fps_doom_overlay &&
++        setting_fps_hybrid && Memory.ROMCRC32 == 0x09e85ea6)
++        return fps_doom_buttons;
++    return word;
++}
+ static bool setting_mouse_select_clutch = false;
+ static bool analog_mouse_clutch[2] = {};
+ static unsigned long long analog_mouse_frame = 0;
+@@ -99,6 +118,16 @@
+     if (!setting_mouse_left_analog || port < 0 || port > 1 ||
+         !analog_mouse_trackers[port].initialized)
+         return false;
++    if (fps_game())
++    {
++        int x = fps_motion_x[port], y = fps_motion_y[port];
++        dx = x < 0 ? 128 | -x : x;
++        dy = y < 0 ? 128 | -y : y;
++        if (setting_mouse_diagnostics && log_cb)
++            log_cb(RETRO_LOG_INFO, "AM_FPS frame=%llu port=%d packet=%d,%d buttons=%04x\n",
++                analog_mouse_frame, port + 1, x, y, unsigned(fps_doom_buttons));
++        return true; // No accumulated backlog and no position-reference correction.
++    }
+     AnalogMouseReference r;
+     bool fly = false;
+     if (port == 0 && Memory.ROMCRC32 == 0x38c9626c &&
+@@ -386,6 +415,17 @@
+     char key[256];
+     struct retro_variable var;
+ 
++    var.key = "snes9x_fps_hybrid";
++    var.value = NULL;
++    bool fps = environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) &&
++        var.value && !strcmp(var.value, "automatic");
++    if (fps != setting_fps_hybrid)
++        memset(analog_mouse_trackers, 0, sizeof(analog_mouse_trackers));
++    setting_fps_hybrid = fps;
++    var.key = "snes9x_fps_turn_gain";
++    var.value = NULL;
++    setting_fps_gain = (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) ? atoi(var.value) : 1;
++    if (setting_fps_gain < 1 || setting_fps_gain > 4) setting_fps_gain = 1;
+     var.key = "snes9x_mouse_game_profiles";
+     var.value = NULL;
+     setting_mouse_game_profiles = !(environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) &&
+@@ -406,7 +446,7 @@
+     bool diagnostics = environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) &&
+         var.value && !strcmp(var.value, "enabled");
+     if (diagnostics != setting_mouse_diagnostics && log_cb)
+-        log_cb(RETRO_LOG_INFO, "AM_DIAGNOSTICS %s; build=game-profiles-v8\n", diagnostics ? "enabled" : "disabled");
++        log_cb(RETRO_LOG_INFO, "AM_DIAGNOSTICS %s; build=fps-hybrid-v9\n", diagnostics ? "enabled" : "disabled");
+     setting_mouse_diagnostics = diagnostics;
+ 
+     var.key = "snes9x_mouse_input";
+@@ -415,7 +455,8 @@
+         var.value && !strcmp(var.value, "left_analog");
+     if (left_analog != setting_mouse_left_analog)
+         memset(analog_mouse_trackers, 0, sizeof(analog_mouse_trackers));
+-    setting_mouse_left_analog = left_analog;
++    setting_mouse_analog_choice = left_analog;
++    setting_mouse_left_analog = left_analog || fps_game();
+     if (setting_mouse_diagnostics && log_cb)
+         log_cb(RETRO_LOG_INFO, "AM_MODE profiles=%d legacy_mp=%d analog=%d rom=%s crc=%08x\n",
+             int(setting_mouse_game_profiles), int(setting_mouse_mario_paint), int(setting_mouse_left_analog),
+@@ -888,7 +929,7 @@
+ #ifndef GIT_VERSION
+ #define GIT_VERSION ""
+ #endif
+-    info->library_version = VERSION GIT_VERSION " AM v8";
++    info->library_version = VERSION GIT_VERSION " AM v9";
+     info->valid_extensions = "smc|sfc|swc|fig|bs";
+     info->need_fullpath = false;
+     info->block_extract = false;
+@@ -962,11 +1003,15 @@
+ void retro_reset()
+ {
+     memset(analog_mouse_trackers, 0, sizeof(analog_mouse_trackers));
++    memset(fps_motion_x, 0, sizeof(fps_motion_x));
++    memset(fps_motion_y, 0, sizeof(fps_motion_y));
+     memset(snes_mouse_state, 0, sizeof(snes_mouse_state));
+     S9xSoftReset();
+ }
+ 
+ static unsigned snes_devices[8];
++static bool fps_ports_active = false;
++static unsigned fps_saved_devices[2] = {};
+ void retro_set_controller_port_device(unsigned port, unsigned device)
+ {
+     if (port < 8)
+@@ -1030,6 +1075,29 @@
+         log_cb(RETRO_LOG_INFO, "Nonexistent Port (%d).\n", port);
+ }
+ 
++static void configure_fps_ports()
++{
++    bool active = fps_game();
++    unsigned d0 = Memory.ROMCRC32 == 0x6582a8f5 ? RETRO_DEVICE_JOYPAD : RETRO_DEVICE_MOUSE;
++    unsigned d1 = Memory.ROMCRC32 == 0x6582a8f5 ? RETRO_DEVICE_MOUSE : RETRO_DEVICE_NONE;
++    if (active == fps_ports_active && (!active || (snes_devices[0] == d0 && snes_devices[1] == d1))) return;
++    if (active)
++    {
++        if (!fps_ports_active) { fps_saved_devices[0] = snes_devices[0]; fps_saved_devices[1] = snes_devices[1]; }
++        retro_set_controller_port_device(0, Memory.ROMCRC32 == 0x6582a8f5 ? RETRO_DEVICE_JOYPAD : RETRO_DEVICE_MOUSE);
++        retro_set_controller_port_device(1, Memory.ROMCRC32 == 0x6582a8f5 ? RETRO_DEVICE_MOUSE : RETRO_DEVICE_NONE);
++    }
++    else
++    {
++        retro_set_controller_port_device(0, fps_saved_devices[0]);
++        retro_set_controller_port_device(1, fps_saved_devices[1]);
++    }
++    fps_ports_active = active;
++    snes9x_fps_doom_overlay = active && Memory.ROMCRC32 == 0x09e85ea6;
++    memset(fps_motion_x, 0, sizeof(fps_motion_x)); memset(fps_motion_y, 0, sizeof(fps_motion_y));
++    memset(analog_mouse_trackers, 0, sizeof(analog_mouse_trackers));
++}
++
+ void retro_cheat_reset()
+ {
+     S9xDeleteCheats();
+@@ -1276,7 +1344,11 @@
+         log_cb(RETRO_LOG_ERROR, "ROM loading failed...\n");
+ 
+     Memory.ClearSRAM();
+-
++    // The new upstream GSU cycle mode stalls this verified Doom revision.
++    // Restore the established Snes9x instruction-budget timing for this ROM.
++    Settings.DisableGSUCycleMode = rom_loaded && Memory.ROMCRC32 == 0x09e85ea6;
++    if (rom_loaded && Settings.SuperFX) S9xReset();
++    configure_fps_ports();
+     return rom_loaded;
+ }
+ 
+@@ -1413,7 +1485,8 @@
+ }
+ 
+ void retro_unload_game(void)
+-{}
++{
++    fps_ports_active = false; snes9x_fps_doom_overlay = false;}
+ 
+ static void map_buttons();
+ 
+@@ -1808,7 +1881,17 @@
+         {
+             case RETRO_DEVICE_JOYPAD:
+                 for (int i = BTN_FIRST; i <= BTN_LAST; i++)
+-                    S9xReportButton(MAKE_BUTTON(port * offset + 1, i), input_state_cb(port * offset, RETRO_DEVICE_JOYPAD, 0, i));
++                    {
++                        bool held = input_state_cb(port * offset, RETRO_DEVICE_JOYPAD, 0, i);
++                        if (fps_game() && Memory.ROMCRC32 == 0x6582a8f5 && port == 0)
++                        {
++                            if (i == RETRO_DEVICE_ID_JOYPAD_LEFT || i == RETRO_DEVICE_ID_JOYPAD_RIGHT || i == RETRO_DEVICE_ID_JOYPAD_X) held = false;
++                            if (i == RETRO_DEVICE_ID_JOYPAD_L) held = held || input_state_cb(0,RETRO_DEVICE_JOYPAD,0,RETRO_DEVICE_ID_JOYPAD_LEFT);
++                            if (i == RETRO_DEVICE_ID_JOYPAD_R) held = held || input_state_cb(0,RETRO_DEVICE_JOYPAD,0,RETRO_DEVICE_ID_JOYPAD_RIGHT);
++                            if (i == RETRO_DEVICE_ID_JOYPAD_SELECT) held = input_state_cb(0,RETRO_DEVICE_JOYPAD,0,RETRO_DEVICE_ID_JOYPAD_X);
++                        }
++                        S9xReportButton(MAKE_BUTTON(port * offset + 1, i), held);
++                    }
+                 break;
+ 
+             case RETRO_DEVICE_JOYPAD_MULTITAP:
+@@ -1818,6 +1901,37 @@
+                 break;
+ 
+             case RETRO_DEVICE_MOUSE:
++                if (fps_game())
++                {
++                    int dx, ignored;
++                    analog_mouse_delta(analog_mouse_trackers[port],
++                        input_state_cb(0,RETRO_DEVICE_ANALOG,RETRO_DEVICE_INDEX_ANALOG_LEFT,RETRO_DEVICE_ID_ANALOG_X),
++                        input_state_cb(0,RETRO_DEVICE_ANALOG,RETRO_DEVICE_INDEX_ANALOG_LEFT,RETRO_DEVICE_ID_ANALOG_Y),
++                        256,224,false,dx,ignored);
++                    bool doom = Memory.ROMCRC32 == 0x09e85ea6;
++                    auto down = [](int id) { return input_state_cb(0,RETRO_DEVICE_JOYPAD,0,id) != 0; };
++                    int walk = down(RETRO_DEVICE_ID_JOYPAD_Y) ? 45 : 30;
++                    if (doom && down(RETRO_DEVICE_ID_JOYPAD_LEFT) != down(RETRO_DEVICE_ID_JOYPAD_RIGHT))
++                        dx = down(RETRO_DEVICE_ID_JOYPAD_LEFT) ? -walk : walk;
++                    else dx *= setting_fps_gain;
++                    fps_motion_x[port] = analog_mouse_clamp(dx,-63,63);
++                    fps_motion_y[port] = doom ? walk * (int(down(RETRO_DEVICE_ID_JOYPAD_DOWN)) - int(down(RETRO_DEVICE_ID_JOYPAD_UP))) : 0;
++                    fps_doom_buttons = (down(RETRO_DEVICE_ID_JOYPAD_B) ? 0x4000 : 0) |
++                        (down(RETRO_DEVICE_ID_JOYPAD_A) ? 0x0080 : 0) |
++                        (down(RETRO_DEVICE_ID_JOYPAD_X) ? 0x0040 : 0) |
++                        (down(RETRO_DEVICE_ID_JOYPAD_Y) ? 0x8000 : 0) |
++                        (down(RETRO_DEVICE_ID_JOYPAD_START) ? 0x1000 : 0) |
++                        (down(RETRO_DEVICE_ID_JOYPAD_LEFT) ? 0x0020 : 0) |
++                        (down(RETRO_DEVICE_ID_JOYPAD_RIGHT) ? 0x0010 : 0);
++                    snes_mouse_state[port][0] += fps_motion_x[port];
++                    snes_mouse_state[port][1] += fps_motion_y[port];
++                    S9xReportPointer(BTN_POINTER + port,snes_mouse_state[port][0],snes_mouse_state[port][1]);
++                    bool left = doom && (down(RETRO_DEVICE_ID_JOYPAD_B) || down(RETRO_DEVICE_ID_JOYPAD_START));
++                    bool right = doom && (down(RETRO_DEVICE_ID_JOYPAD_A) || down(RETRO_DEVICE_ID_JOYPAD_START));
++                    S9xReportButton(MAKE_BUTTON(port + 1,MOUSE_LEFT),left);
++                    S9xReportButton(MAKE_BUTTON(port + 1,MOUSE_RIGHT),right);
++                    break;
++                }
+                 if (setting_mouse_left_analog)
+                 {
+                     int16_t raw_x = input_state_cb(port, RETRO_DEVICE_ANALOG,
+@@ -1995,6 +2109,8 @@
+         S9xSetSoundMute(false);
+     }
+ 
++    configure_fps_ports();
++    setting_mouse_left_analog = setting_mouse_analog_choice || fps_game();
+     poll_cb();
+     report_buttons();
+     S9xMainLoop();
+--- a/libretro/libretro_core_options.h
++++ b/libretro/libretro_core_options.h
+@@ -59,6 +59,18 @@
+          { NULL, NULL },
+       },
+       "disabled"
++   },
++   {
++      "snes9x_fps_hybrid", "FPS Hybrid Controls",
++      "Automatic configures the verified USA Doom and Wolfenstein 3D ROMs for motion-only Wiimote turning plus gamepad actions from frontend port 1. D-pad walks/strafes, B fires, A uses, X changes weapon, Y runs, Start pauses. Select stays free for frontend hotkeys. Automatically selects the required SNES devices. Save as game options; restart content after changing this option.",
++      { { "disabled", "Disabled" }, { "automatic", "Automatic (Doom / Wolf3D)" }, { NULL, NULL } },
++      "disabled"
++   },
++   {
++      "snes9x_fps_turn_gain", "FPS Turning Sensitivity",
++      "Scale changes in Wiimote horizontal position. Holding still produces zero turning at every position. Large movement packets are capped without a delayed backlog. Applies only to FPS Hybrid Controls.",
++      { { "1", "1x" }, { "2", "2x" }, { "4", "4x" }, { NULL, NULL } },
++      "1"
+    },
+    {
+       "snes9x_mouse_game_profiles",
+--- a/getset.h
++++ b/getset.h
+@@ -8,6 +8,9 @@
+ #define _GETSET_H_
+ 
+ #include "cpuexec.h"
++#ifdef __LIBRETRO__
++#include "libretro/analog_mouse.h"
++#endif
+ #include "dsp.h"
+ #include "sa1.h"
+ #include "spc7110.h"
+@@ -425,6 +428,9 @@
+ 
+ inline void S9xSetWord (uint16 Word, uint32 Address, enum s9xwrap_t w = WRAP_NONE, enum s9xwriteorder_t o = WRITE_01)
+ {
++#ifdef __LIBRETRO__
++    if (snes9x_fps_doom_overlay) Word = snes9x_fps_input_word(Address, Word);
++#endif
+ 	uint32	mask = MEMMAP_MASK & (w == WRAP_PAGE ? 0xff : (w == WRAP_BANK ? 0xffff : 0xffffff));
+ 	if ((Address & mask) == mask)
+ 	{
+--- a/libretro/analog_mouse.h
++++ b/libretro/analog_mouse.h
+@@ -7,6 +7,9 @@
+ 
+ void snes9x_analog_mouse_log_packet(int port, int cur_x, int cur_y,
+         int old_x, int old_y, unsigned dx, unsigned dy, unsigned buttons);
++
++extern bool snes9x_fps_doom_overlay;
++uint16_t snes9x_fps_input_word(uint32_t address, uint16_t word);
+ 
+ struct AnalogMouseTracker
+ {

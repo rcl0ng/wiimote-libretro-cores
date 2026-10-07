@@ -1,0 +1,766 @@
+diff --git a/src/burn/drv/galaxian/gal_run.cpp b/src/burn/drv/galaxian/gal_run.cpp
+index 891864476..10871f997 100644
+--- a/src/burn/drv/galaxian/gal_run.cpp
++++ b/src/burn/drv/galaxian/gal_run.cpp
+@@ -1,4 +1,5 @@
+ #include "gal.h"
++#include "galaga_ir.h"
+ 
+ // Harem (Galaxian bootleg) protection: an opcode/data ROM bankswitch driven by
+ // a 4-bit shift register clocked through 0x5801-0x5803 (dispatched in the write
+@@ -563,9 +564,38 @@ void KonamiPPIInit()
+ 	ppi8255_set_write_ports(1, KonamiSoundLatchWrite, KonamiSoundControlWrite, NULL);
+ }
+ 
++
++// Exact original Galaxian set: change real movement inside its native task.
++static bool galaxianIRReady = false;
++static UINT8 galaxianIRMove[30];
++static UINT8 GalaxianIRPosition()
++{
++ unsigned p=GalZ80Ram1[0x0d]&1;
++ int x=ArcadeIRAxis(p,0);
++ if (GalZ80Ram1[0x18]&1) x=-1-x;
++ return 0xe9-((x+32768)*(0xe9-0x16)+32767)/65535;
++}
++static void GalaxianIRApply()
++{
++ if (!galaxianIRReady) return;
++ bool playing=(GalZ80Ram1[6]&1)!=0;
++ unsigned p=GalZ80Ram1[0x0d]&1;
++ UINT8 patch[30]={0x3a,0x01,0x70,0x21,0x02,0x42,0x77,0xc3,0x65,0x08};
++ bool aim=playing && ArcadeIREnabled(p);
++ memcpy(GalZ80Rom1+0x847,aim ? patch : galaxianIRMove,30);
++ if (aim) {
++  GalInput[0]&=~0x10; GalInput[1]&=~0x10;
++  if (ArcadeIRFire(p)) { GalInput[0]|=0x10;GalInput[1]|=0x10; }
++ }
++ GalZ80Rom1[0x1314]=playing && GalagaIRUnlimitedLives ? 0 : 0x35;
++ if (playing && GalagaIRUnlimitedLives && GalZ80Ram1[0x21d]==0) GalZ80Ram1[0x21d]=1;
++ GalZ80Rom1[0x12f2]=playing && GalagaIRInvincible ? 0xc9 : 0xc8;
++}
++
+ // Galaxian Memory Map
+ UINT8 __fastcall GalaxianZ80Read(UINT16 a)
+ {
++	if (a==0x7001 && galaxianIRReady) return GalaxianIRPosition();
+ 	switch (a) {
+ 		case 0x6000: {
+ 			//bprintf(0, _T("in0: %X\n"), GalInput[0] | GalDip[0]);
+@@ -706,6 +736,7 @@ void __fastcall GalaxianZ80PortWrite(UINT16 a, UINT8 d)
+ 
+ INT32 GalInit()
+ {
++ galaxianIRReady=false;
+ 	INT32 nLen;
+ 	
+ 	GalLoadRoms(0);
+@@ -1950,6 +1981,7 @@ void MapScobra()
+ 
+ INT32 GalExit()
+ {
++ galaxianIRReady=false;
+ 	if (GalZ80Rom1Size) ZetExit();
+ 	if (GalS2650Rom1Size) s2650Exit();
+ 	
+@@ -2094,7 +2126,14 @@ INT32 GalFrame()
+ 		GalDoReset();
+ 	}
+ 
++
++ if (!galaxianIRReady && strcmp(BurnDrvGetTextA(DRV_NAME),"galaxian")==0 &&
++     GalZ80Rom1[0x847]==0x3a && GalZ80Rom1[0x848]==0x18 &&
++     GalZ80Rom1[0x1314]==0x35 && GalZ80Rom1[0x12f2]==0xc8) {
++  memcpy(galaxianIRMove,GalZ80Rom1+0x847,30);galaxianIRReady=true;
++ }
+ 	GalMakeInputs();
++ GalaxianIRApply();
+ 	GalVBlank = 0;
+ 	
+ 	if (GalZ80Rom1Size) ZetNewFrame();
+diff --git a/src/burn/drv/pre90s/d_galaga.cpp b/src/burn/drv/pre90s/d_galaga.cpp
+index 84600efa3..c3c6479ee 100644
+--- a/src/burn/drv/pre90s/d_galaga.cpp
++++ b/src/burn/drv/pre90s/d_galaga.cpp
+@@ -3,6 +3,7 @@
+ // Xevious added April 22, 2019 - CupcakeFan
+ 
+ #include "tiles_generic.h"
++#include "galaga_ir.h"
+ #include "z80_intf.h"
+ #include "namco_snd.h"
+ #include "samples.h"
+@@ -1091,8 +1092,106 @@ static UINT8 namcoZ80ReadDip(UINT16 offset)
+ 	return retVal;
+ }
+ 
++// Absolute IR input for the exact Namco rev. B set supplied by Ron.
++// Patches live only in the loaded ROM buffer; original ZIP files are untouched.
++bool GalagaIRUnlimitedLives = false;
++bool GalagaIRInvincible = false;
++bool GalagaIRDoubleFighter = false;
++static bool galagaIRReady = false;
++static bool galagaIREnabled[2] = { false, false };
++static bool galagaIRFire[2] = { false, false };
++static INT32 galagaIRY[2] = { 0, 0 };
++static INT32 galagaIRX[2] = { 0, 0 };
++static UINT8 galagaIRMoveOriginal[13];
++static const UINT8 galagaIRMovePatch[13] = {
++    0x21,0x62,0x93,0x7e,0xa7,0xc8, // native inactive-ship guard: return if X=0
++    0x3a,0x00,0x60,0x77,   // ld a,(6000) / ld (hl),a: real gameplay position
++    0xc3,0xde,0x1f         // jp 1fde: original double-fighter positioning
++};
++void GalagaIRSetInput(unsigned port, bool enabled, int x, int y, bool fire)
++{
++    if (port < 2) { galagaIREnabled[port] = enabled; galagaIRX[port] = x; galagaIRY[port] = y; galagaIRFire[port] = fire; }
++}
++bool ArcadeIREnabled(unsigned port) { return port<2 && galagaIREnabled[port]; }
++int ArcadeIRAxis(unsigned port,unsigned axis) { return port<2 ? (axis ? galagaIRY[port] : galagaIRX[port]) : 0; }
++bool ArcadeIRFire(unsigned port) { return port<2 && galagaIRFire[port]; }
++
++static void GalagaIRInit()
++{
++    galagaIRReady = false;
++    // Never apply these addresses to another revision or to Dig Dug/Xevious.
++    if (strcmp(BurnDrvGetTextA(DRV_NAME), "galaga") != 0) return;
++    static const UINT8 move[13] = {0xe6,0x0a,0xfe,0x0a,0x28,0x37,0x21,0x15,0x92,0xcb,0x46,0x28,0x02};
++    static const UINT8 dual[9] = {0xcb,0x43,0xc8,0xc6,0x0f,0x32,0x60,0x93,0xc9};
++    static const UINT8 lives[7] = {0x21,0x20,0x98,0x7e,0x35,0xa7,0xc2};
++    static const UINT8 hit[4] = {0x3a,0x14,0x90,0xa7};
++    if (memcmp(memory.Z80.rom1+0x1f9c,move,13) ||
++        memcmp(memory.Z80.rom1+0x1fde,dual,9) ||
++        memcmp(memory.Z80.rom1+0x04e2,lives,7) ||
++        memcmp(memory.Z80.rom2+0x05ee,hit,4)) {
++        bprintf(PRINT_ERROR, _T("[Galaga IR] ROM signature mismatch; custom patches disabled.\n"));
++        return;
++    }
++    memcpy(galagaIRMoveOriginal, memory.Z80.rom1+0x1f9c,13);
++    galagaIRReady = true;
++    bprintf(PRINT_NORMAL, _T("[Galaga IR] Namco rev. B signatures verified.\n"));
++}
++static UINT8 GalagaIRPosition()
++{
++    const unsigned player = memory.RAM.shared3[0x40] & 1; // active player ID at 9840
++    if (!galagaIRReady || !galagaIREnabled[player] || memory.RAM.shared2[0x201] != 3)
++        return memory.RAM.shared2[0x362];
++    const INT32 lo = 0x12;
++    const INT32 hi = memory.RAM.shared3[0x27] & 1 ? 0xd1 : 0xe1;
++    INT32 x = galagaIRX[player];
++    // Cocktail native movement reverses along with the display.
++    if (memory.RAM.shared2[0x215] & 1) x = -1-x;
++    return lo + ((x+32768)*(hi-lo)+32767)/65535;
++}
++static void GalagaIRApply()
++{
++    if (!galagaIRReady) return;
++    const bool playing = memory.RAM.shared2[0x201] == 3;
++    const unsigned player = memory.RAM.shared3[0x40] & 1;
++    // Grant a real native second fighter only while the main ship is playable.
++    // Wait for a destroyed secondary fighter to disappear; don't overwrite
++    // explosions, tractor-beam capture, or the rescued-ship landing sequence.
++    if (playing && GalagaIRDoubleFighter && memory.RAM.shared2[0x14] &&
++        !memory.RAM.shared2[0x1c] && !memory.RAM.shared2[0x1d] &&
++        !(memory.RAM.shared3[0x27] & 1) && memory.RAM.shared2[0x362] &&
++        !memory.RAM.shared2[0x360] && memory.RAM.shared1[0x362] == 6) {
++        if (memory.RAM.shared2[0x362] > 0xd1) memory.RAM.shared2[0x362] = 0xd1;
++        // The three sprite buffers are code/color, position, and control.
++        memory.RAM.shared1[0x360] = 6;
++        memory.RAM.shared1[0x361] = 9;
++        memory.RAM.shared2[0x360] = memory.RAM.shared2[0x362] + 15;
++        memory.RAM.shared2[0x361] = memory.RAM.shared2[0x363];
++        memory.RAM.shared3[0x360] = memory.RAM.shared3[0x362];
++        memory.RAM.shared3[0x361] = memory.RAM.shared3[0x363];
++        memory.RAM.shared1[0x60] = memory.RAM.shared1[0x62];
++        memory.RAM.shared3[0x27] = 1;
++    }
++    const bool aim = playing && galagaIREnabled[player];
++    // Upright Galaga shares one physical stick between turns. Route the active
++    // frontend player's trigger into both native cabinet input banks.
++    if (aim) {
++        for (INT32 p=1;p<=2;p++) {
++            input.ports[p].current.byte |= 0x10;
++            if (galagaIRFire[player]) input.ports[p].current.byte &= 0xef;
++        }
++    }
++    memcpy(memory.Z80.rom1+0x1f9c, aim ? galagaIRMovePatch : galagaIRMoveOriginal,13);
++    // Keep the game's death/respawn/capture logic; suppress only reserve decrement.
++    memory.Z80.rom1[0x04e6] = playing && GalagaIRUnlimitedLives ? 0x00 : 0x35;
++    if (playing && GalagaIRUnlimitedLives && memory.RAM.shared3[0x20] == 0)
++        memory.RAM.shared3[0x20] = 1;
++    // Collision task returns immediately; capture is a separate native task.
++    memory.Z80.rom2[0x05ee] = playing && GalagaIRInvincible ? 0xc9 : 0x3a;
++}
++
+ static UINT8 __fastcall namcoZ80ProgRead(UINT16 addr)
+ {
++    if (addr == 0x6000 && galagaIRReady) return GalagaIRPosition();
+ 	struct CPU_Rd_Table *rdEntry = machine.config->rdAddrList;
+ 	UINT8 dta = 0;
+ 
+@@ -1234,6 +1333,7 @@ static void namcoRenderSprites(void)
+ 
+ static INT32 DrvExit(void)
+ {
++	galagaIRReady = false;
+ 	GenericTilesExit();
+ 
+ 	NamcoSoundExit();
+@@ -1316,6 +1416,7 @@ static INT32 DrvFrame(void)
+ 	}
+ 
+ 	DrvMakeInputs();
++	GalagaIRApply();
+ 
+ 	INT32 nInterleave = 400;
+ 	INT32 nCyclesTotal[3];
+@@ -2105,7 +2206,9 @@ static INT32 galagaInit(void)
+ 
+ 	machine.config = &galagaMachineConfig;
+ 
+-	return namcoInitBoard();
++	INT32 result = namcoInitBoard();
++	if (!result) GalagaIRInit();
++	return result;
+ }
+ 
+ static struct Machine_Config_Def gallagMachineConfig =
+diff --git a/src/burn/drv/pre90s/d_gaplus.cpp b/src/burn/drv/pre90s/d_gaplus.cpp
+index 36db5dc25..1b3d8ce49 100644
+--- a/src/burn/drv/pre90s/d_gaplus.cpp
++++ b/src/burn/drv/pre90s/d_gaplus.cpp
+@@ -1,3 +1,4 @@
++#include "galaga_ir.h"
+ // FB Neo Galaga 3 / Gaplus driver module
+ // Based on MAME driver by Manuel Abadia, Ernesto Corvi, and Nicola Salmoria
+ 
+@@ -341,8 +342,49 @@ static void gaplus_main_write(UINT16 address, UINT8 data)
+ 	}
+ }
+ 
++
++static bool gaplusIRReady=false;
++static UINT8 gaplusIRMove[21];
++static UINT8 GaplusIRPosition(unsigned axis)
++{
++ unsigned p=DrvSprRAM[0x82d]&1;
++ if (!axis) {
++  int lo=DrvSprRAM[0x878],hi=DrvSprRAM[0x879];
++  if (DrvSprRAM[0x8db]) { lo+=48;hi-=48; }
++  return lo+((ArcadeIRAxis(p,0)+32768)*(hi-lo)+32767)/65535;
++ }
++ int y=0xc8+((ArcadeIRAxis(p,1)+32768)*(0x149-0xc8)+32767)/65535;
++ return axis==1 ? y&255 : (DrvSprRAM[0x1601]&0xfe)|(y>>8);
++}
++static void GaplusIRApply()
++{
++ if (!gaplusIRReady) return;
++ bool playing=DrvSprRAM[0x82f]>=1 && DrvSprRAM[0x82f]<9;
++ unsigned p=DrvSprRAM[0x82d]&1;
++ bool aim=playing && ArcadeIREnabled(p);
++ UINT8 patch[21]={0xb6,0x70,0x00,0xb7,0x16,0x00,0xb6,0x70,0x01,0xb7,0x16,0x01,0xb6,0x70,0x02,0xb7,0x1e,0x01,0x7e,0xcf,0xed};
++ memcpy(DrvM6809ROM0+0x2f8f,aim ? patch : gaplusIRMove,21);
++ if (aim) {
++  DrvInputs[2]|=3;
++  if (ArcadeIRFire(p)) DrvInputs[2]&=~3;
++ }
++ if (playing && GalagaIRUnlimitedLives) {
++  if (DrvSprRAM[0x904+p]<3) DrvSprRAM[0x904+p]=3;
++ }
++ if (playing && GalagaIRInvincible) DrvSprRAM[0x81a]=0xff;
++ // Native six captured escorts, using the game's own initialization values.
++ if (playing && GalagaIRDoubleFighter && !DrvSprRAM[0x8d9] && !DrvSprRAM[0x8db]) {
++  for (int i=0;i<6;i++) {
++   DrvSprRAM[0x6c2+i*2]=0xf0;DrvSprRAM[0x6c3+i*2]=0x25;
++   DrvSprRAM[0x16c2+i*2]=0;DrvSprRAM[0x16c3+i*2]=0x81;
++  }
++  DrvSprRAM[0x8db]=1;
++ }
++}
++
+ static UINT8 gaplus_main_read(UINT16 address)
+ {
++ if (gaplusIRReady && address>=0x7000 && address<=0x7002) return GaplusIRPosition(address-0x7000);
+ 	if ((address & 0xfc00) == 0x6000) {
+ 		return namco_15xx_sharedram_read(address);
+ 	}
+@@ -686,6 +728,7 @@ static INT32 DrvInit(INT32 gaplusd)
+ 
+ static INT32 DrvExit()
+ {
++ gaplusIRReady=false;
+ 	GenericTilesExit();
+ 
+ 	M6809Exit();
+@@ -874,6 +917,12 @@ static INT32 DrvFrame()
+ 		}
+ 	}
+ 
++ if (!gaplusIRReady && strcmp(BurnDrvGetTextA(DRV_NAME),"galaga3")==0 &&
++  DrvM6809ROM0[0x2f8f]==0xf6 && DrvM6809ROM0[0x2f90]==0x16 && DrvM6809ROM0[0x2f91]==0) {
++  memcpy(gaplusIRMove,DrvM6809ROM0+0x2f8f,21);gaplusIRReady=true;
++ }
++ GaplusIRApply();
++
+ 	INT32 nInterleave = 264;
+ 	INT32 nCyclesTotal[3] = { (INT32)((double)1536000 / 60.606061), (INT32)((double)1536000 / 60.606061), (INT32)((double)1536000 / 60.606061) };
+ 	INT32 nCyclesDone[3] = { 0, 0 };
+diff --git a/src/burn/drv/pre90s/d_invaders.cpp b/src/burn/drv/pre90s/d_invaders.cpp
+index bc1ee4ae1..5f5986f9f 100644
+--- a/src/burn/drv/pre90s/d_invaders.cpp
++++ b/src/burn/drv/pre90s/d_invaders.cpp
+@@ -1,3 +1,4 @@
++#include "galaga_ir.h"
+ // FB Neo Space Invaders driver module
+ // Based on MAME driver by Michael Strutts, Nicola Salmoria, Tormod Tjaberg, Mirko Buffoni,
+ // Lee Taylor, Valerio Verrando, Marco Cassili, Zsolt Vasvari and others
+@@ -240,8 +241,37 @@ static void __fastcall invaders_write_port(UINT16 port, UINT8 data)
+ 	}
+ }
+ 
++
++static bool invadersIRReady=false;
++static UINT8 invadersIRMove[12];
++static UINT8 InvadersIRPosition()
++{
++ unsigned p=DrvMainRAM[0x67]==0x22 ? 1 : 0;
++ int x=ArcadeIRAxis(p,0);
++ return 0x30+((x+32768)*(0xd9-0x30)+32767)/65535;
++}
++static void InvadersIRApply()
++{
++ if (!invadersIRReady) return;
++ bool playing=DrvMainRAM[0xef]!=0;
++ unsigned p=DrvMainRAM[0x67]==0x22 ? 1 : 0;
++ bool aim=playing && ArcadeIREnabled(p);
++ UINT8 patch[12]={0xdb,0x7e,0x32,0x1b,0x20,0xc3,0x6f,0x03};
++ memcpy(DrvI8080ROM+0x363,aim ? patch : invadersIRMove,12);
++ if (aim) {
++  DrvInputs[1]&=~0x10;DrvInputs[2]&=~0x10;
++  if (ArcadeIRFire(p)) {DrvInputs[1]|=0x10;DrvInputs[2]|=0x10;}
++ }
++ DrvI8080ROM[0x1a85]=playing && GalagaIRUnlimitedLives ? 0x00 : 0x3d;
++ DrvI8080ROM[0x293]=playing && GalagaIRInvincible ? 0xc3 : 0xca;
++ if (playing && GalagaIRInvincible) {
++  DrvMainRAM[0x15]=0xff;DrvMainRAM[0x94]&=~4;
++ }
++}
++
+ static UINT8 __fastcall invaders_read_port(UINT16 port)
+ {
++ if ((port&255)==0x7e && invadersIRReady) return InvadersIRPosition();
+ 	switch (port & 0x03)
+ 	{
+ 		case 0x00:
+@@ -302,6 +332,7 @@ static INT32 MemIndex()
+ 
+ static INT32 DrvInit(INT32 rom_size, INT32 rom_count, UINT32 input_xor)
+ {
++ invadersIRReady=false;
+ 	BurnAllocMemIndex();
+ 
+ 	{
+@@ -342,6 +373,7 @@ static INT32 DrvInit(INT32 rom_size, INT32 rom_count, UINT32 input_xor)
+ 
+ static INT32 DrvExit()
+ {
++ invadersIRReady=false;
+ 	GenericTilesExit();
+ 
+ 	ZetExit();
+@@ -460,6 +492,13 @@ static INT32 DrvFrame()
+ 		}
+ 	}
+ 
++ if (!invadersIRReady && strcmp(BurnDrvGetTextA(DRV_NAME),"invaders")==0 &&
++  DrvI8080ROM[0x363]==0xcd && DrvI8080ROM[0x364]==0xc0 &&
++  DrvI8080ROM[0x1a85]==0x3d && DrvI8080ROM[0x293]==0xca) {
++  memcpy(invadersIRMove,DrvI8080ROM+0x363,12);invadersIRReady=true;
++ }
++ InvadersIRApply();
++
+ 	INT32 nInterleave = 256;
+ 	INT32 nCyclesTotal[1] = { 1996800 / 60 };
+ 	INT32 nCyclesDone[1] = { 0 };
+@@ -852,3 +891,4 @@ struct BurnDriver BurnDrvOzmawars3 = {
+ 	Ozmawars2Init, DrvExit, DrvFrame, DrvDraw, DrvScan, &DrvRecalc, 2,
+ 	224, 260, 3, 4
+ };
++
+diff --git a/src/burn/drv/pre90s/d_namcos1.cpp b/src/burn/drv/pre90s/d_namcos1.cpp
+index f61183266..8f2b9a09b 100644
+--- a/src/burn/drv/pre90s/d_namcos1.cpp
++++ b/src/burn/drv/pre90s/d_namcos1.cpp
+@@ -1,3 +1,4 @@
++#include "galaga_ir.h"
+ // FB Alpha Namco System 1 driver module
+ // Based on MAME driver by Ernesto Corvi
+ 
+@@ -898,8 +899,41 @@ static void namco_c116_write(UINT16 offset, UINT8 data)
+ 	DrvPalette[color] = BurnHighCol(DrvPalRAMR[color], DrvPalRAMG[color], DrvPalRAMB[color], 0);
+ }
+ 
++
++static bool galaga88IRReady=false;
++static UINT32 galaga88IRMoves[16];
++static unsigned galaga88IRCount=0;
++static UINT8 galaga88IRMove[16];
++static UINT8 Galaga88IRPosition()
++{
++ unsigned p=DrvMainRAM[0x2f]&1;
++ int x=ArcadeIRAxis(p,0);
++ if (p && DrvMainRAM[0x30]!=2) x=-1-x;
++ int lo=0x19-(INT8)DrvMainRAM[0x9e];
++ int hi=0xe8-DrvMainRAM[0x9d];
++ return lo+((x+32768)*(hi-lo)+32767)/65535;
++}
++static void Galaga88IRApply()
++{
++ if (!galaga88IRReady) return;
++ bool playing=DrvMainRAM[0x35]==5;
++ unsigned p=DrvMainRAM[0x2f]&1;
++ bool aim=playing && !DrvMainRAM[0xeb] && ArcadeIREnabled(p);
++ // Preserve the native capture/inactive gate immediately before this block.
++ UINT8 patch[16]={0xb6,0x2f,0xee,0x97,0x51,0x0f,0x3b,0x0f,0x3c,0x0f,0x3d,0x0f,0x3e,0x0f,0x3f,0x39};
++ for (unsigned i=0;i<galaga88IRCount;i++) memcpy(DrvMainROM+galaga88IRMoves[i],aim ? patch : galaga88IRMove,16);
++ if (aim) {
++  DrvInputs[0]|=0x10;DrvInputs[1]|=0x10;
++  if (ArcadeIRFire(p)) {DrvInputs[0]&=~0x10;DrvInputs[1]&=~0x10;}
++ }
++ if (playing && GalagaIRUnlimitedLives && DrvMainRAM[0x76]<3) DrvMainRAM[0x76]=3;
++ if (playing && GalagaIRInvincible) DrvMainRAM[0xd0]=0x75;
++ if (playing && GalagaIRDoubleFighter && !DrvMainRAM[0x60]) DrvMainRAM[0x64]=2;
++}
++
+ static UINT8 virtual_read(UINT32 address)
+ {
++ if (galaga88IRReady && address==0x2fefee) return Galaga88IRPosition();
+ 	if (address >= 0x2e0000 && address <= 0x2e7fff) {
+ 		return namco_c116_read(address & 0x7fff);
+ 	}
+@@ -1659,6 +1693,7 @@ static INT32 DrvInit()
+ 
+ static INT32 DrvExit()
+ {
++ galaga88IRReady=false;galaga88IRCount=0;
+ 	GenericTilesExit();
+ 
+ 	input_read_callback = NULL;
+@@ -1959,6 +1994,16 @@ static INT32 DrvFrame()
+ 		}
+ 	}
+ 
++ if (!galaga88IRReady && strcmp(BurnDrvGetTextA(DRV_NAME),"galaga88")==0) {
++  static const UINT8 signature[16]={0x96,0xeb,0x27,0x05,0xb6,0x4b,0xdb,0x20,0x03,0xb6,0x41,0x29,0x8e,0xb7,0x3c,0x84};
++  galaga88IRCount=0;
++  for (unsigned a=0;a<0x400000-16 && galaga88IRCount<16;a++) {
++   if (!memcmp(DrvMainROM+a,signature,16)) galaga88IRMoves[galaga88IRCount++]=a;
++  }
++  if (galaga88IRCount) {memcpy(galaga88IRMove,signature,16);galaga88IRReady=true;}
++ }
++ Galaga88IRApply();
++
+ 	INT32 nInterleave = 640; // mame interleave
+ 	INT32 S1VBL = ((nInterleave * 240) / 264);
+ 	INT32 nCyclesTotal[4] = { (INT32)((double)1536000 / 60.6060), (INT32)((double)1536000 / 60.6060), (INT32)((double)1536000 / 60.6060), (INT32)((double)1536000 / 60) }; // run dac cpu @ 60hz for better dac sound quality
+@@ -4117,3 +4162,4 @@ struct BurnDriver BurnDrvTankfrcej = {
+ 	TankfrceInit, DrvExit, DrvFrame, DrvDraw, DrvScan, &DrvRecalc, 0x2000,
+ 	288, 224, 4, 3
+ };
++
+diff --git a/src/burner/libretro/libretro.cpp b/src/burner/libretro/libretro.cpp
+index d62ef558b..1113cd290 100644
+--- a/src/burner/libretro/libretro.cpp
++++ b/src/burner/libretro/libretro.cpp
+@@ -448,7 +448,7 @@ void retro_get_system_info(struct retro_system_info *info)
+ 
+ 	sprintf(library_version, "v%x.%x.%x.%02x %s %s", nBurnVer >> 20, (nBurnVer >> 16) & 0x0F, (nBurnVer >> 8) & 0xFF, nBurnVer & 0xFF, GIT_DATE, GIT_VERSION);
+ 
+-	info->library_name = APP_TITLE;
++	info->library_name = "FBNeo Galaga IR";
+ 	info->library_version = strdup(library_version);
+ 	info->need_fullpath = true;
+ 	info->block_extract = true;
+diff --git a/src/burner/libretro/retro_cdemu.cpp b/src/burner/libretro/retro_cdemu.cpp
+index d260b8814..366af82c5 100644
+--- a/src/burner/libretro/retro_cdemu.cpp
++++ b/src/burner/libretro/retro_cdemu.cpp
+@@ -2,7 +2,7 @@
+ 
+ #include "retro_common.h"
+ 
+-#if defined(BUILD_NEOGEO) || defined(BUILD_PCE)
++#if defined(BUILD_NEOGEO) || defined(BUILD_PCE) || defined(BUILD_GALAGA_IR)
+ #include "cd_interface.h"
+ #include "burner.h"
+ #include "burnint.h"
+diff --git a/src/burner/libretro/retro_common.cpp b/src/burner/libretro/retro_common.cpp
+index a8e9ddccb..b5ed1587b 100644
+--- a/src/burner/libretro/retro_common.cpp
++++ b/src/burner/libretro/retro_common.cpp
+@@ -1,5 +1,6 @@
+ #include "retro_common.h"
+ #include "retro_input.h"
++#include "galaga_ir.h"
+ #ifdef BUILD_PGM2
+ #include "retro_pgm2_cards.h"
+ #endif
+@@ -935,12 +936,35 @@ void evaluate_neogeo_bios_mode(const char* drvname)
+ }
+ #endif
+ 
++static struct retro_core_option_v2_definition var_galaga_lives = {
++ "galaga-ir-unlimited-lives", "Infinite Lives", "Infinite Lives",
++ "Keep reserve lives during gameplay. Death and respawn still work normally.", NULL, "cheat",
++ {{"disabled",NULL},{"enabled",NULL},{NULL,NULL}}, "disabled"
++};
++static struct retro_core_option_v2_definition var_galaga_invincible = {
++ "galaga-ir-invincibility", "Invincibility", "Invincibility",
++ "Disable ship collision damage. Boss capture remains a separate game mechanic.", NULL, "cheat",
++ {{"disabled",NULL},{"enabled",NULL},{NULL,NULL}}, "disabled"
++};
++
++static struct retro_core_option_v2_definition var_galaga_double = {
++ "galaga-ir-double-fighter", "Multiple Ships", "Multiple Ships",
++ "Grant the native ship upgrade: Galaga partner, Galaga 88 triple fighter, or Gaplus captured escorts. Existing ships remain when disabled. Not available for Galaxian or Space Invaders.", NULL, "cheat",
++ {{"disabled",NULL},{"enabled",NULL},{NULL,NULL}}, "disabled"
++};
++
+ void set_environment()
+ {
+ 	std::vector<const retro_core_option_v2_definition*> vars_systems;
+ 	struct retro_core_option_v2_definition *option_defs_us;
+ 	struct retro_vfs_interface_info vfs_iface_info;
+ 
++	const char *irDriver=BurnDrvGetTextA(DRV_NAME);
++ if (!irDriver || strcmp(irDriver,"galaxian") && strcmp(irDriver,"invaders"))
++   vars_systems.push_back(&var_galaga_double);
++	vars_systems.push_back(&var_galaga_lives);
++	vars_systems.push_back(&var_galaga_invincible);
++
+ 	// Add the uncategorized core options
+ 	var_fbneo_allow_patched_romsets.desc                   = RETRO_PATCHED_CAT_DESC;
+ 	var_fbneo_allow_patched_romsets.info                   = RETRO_PATCHED_CAT_INFO;
+@@ -1340,7 +1364,7 @@ void set_environment()
+ 		},
+ 		{
+ 			"cheat",
+-			RETRO_CHEAT_CAT_DESC,
++			"Cheats",
+ 			RETRO_CHEAT_CAT_INFO
+ 		},
+ 		{
+@@ -1575,7 +1599,20 @@ static int percent_parser(const char *value)
+ 
+ void check_variables(void)
+ {
+-	struct retro_variable var = {0};
++ struct retro_variable var = {0};
++ GalagaIRUnlimitedLives = false;
++ GalagaIRInvincible = false;
++ GalagaIRDoubleFighter = false;
++ var.key = var_galaga_double.key;
++ if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE,&var) && var.value)
++   GalagaIRDoubleFighter = strcmp(var.value,"enabled") == 0;
++ var.key = var_galaga_lives.key;
++ if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE,&var) && var.value)
++   GalagaIRUnlimitedLives = strcmp(var.value,"enabled") == 0;
++ var.key = var_galaga_invincible.key;
++ if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE,&var) && var.value)
++   GalagaIRInvincible = strcmp(var.value,"enabled") == 0;
++
+ 
+ 	var.key = var_fbneo_cpu_speed_adjust.key;
+ 	if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+diff --git a/src/burner/libretro/retro_input.cpp b/src/burner/libretro/retro_input.cpp
+index ffc57cfb7..2c585f24d 100644
+--- a/src/burner/libretro/retro_input.cpp
++++ b/src/burner/libretro/retro_input.cpp
+@@ -2,6 +2,7 @@
+ #include "retro_common.h"
+ #include "retro_input.h"
+ #include "burn_gun.h"
++#include "galaga_ir.h"
+ 
+ // TODO :
+ // - implement RETROPAD_8PANEL for 8-buttons panels/fightsticks
+@@ -461,6 +462,8 @@ static inline int CinpState(int nCode)
+ 		if (input_cb_wrapper(port, device, 0, id))
+ 			return 1;
+ 
++		if (nDeviceType[port] == RETRO_GALAGA_IR) return 0;
++
+ 		// Handle fake analog inputs
+ 		if (pDirections[port][PGI_ANALOG_X] == NULL && pDirections[port][PGI_LEFT] != NULL && pDirections[port][PGI_RIGHT] != NULL)
+ 		{
+@@ -809,6 +812,9 @@ static INT32 GameInpSpecialOne(struct GameInp* pgi, INT32 nPlayer, char* szb, ch
+ 		}
+ 	}
+ 
++ if (nDeviceType[nPlayer] == RETRO_GALAGA_IR && strcmp(szb,"fire 1")==0)
++   GameInpDigital2RetroInpKey(pgi,nPlayer,RETRO_DEVICE_ID_JOYPAD_B,description);
++
+ 	// After handling super special case(s), we can handle generic pointer/lightgun/mouse logic
+ 	if ((nDeviceType[nPlayer] == RETRO_DEVICE_POINTER || nDeviceType[nPlayer] == RETRO_DEVICE_TOUCHSCREEN) && BurnGunIsActive()) {
+ 		if (strcmp("x-axis", szb) == 0) {
+@@ -3099,7 +3105,7 @@ void SetDefaultDeviceTypes()
+ 				nDeviceType[i] != RETRO_DEVICE_POINTER &&
+ 				nDeviceType[i] != RETRO_DEVICE_TOUCHSCREEN &&
+ 				nDeviceType[i] != RETRO_DEVICE_LIGHTGUN &&
+-				nDeviceType[i] != RETROARCADE_GUN)
++				nDeviceType[i] != RETROARCADE_GUN && nDeviceType[i] != RETRO_GALAGA_IR)
+ 			{
+ 				nDeviceType[i] = RETROPAD_CLASSIC;
+ 			}
+@@ -3135,6 +3141,7 @@ void SetControllerInfo()
+ 	} else {
+ 		// For anything else, let's use standard device handling for now
+ 		static const struct retro_controller_description controller_description[] = {
++			{ "Wiimote IR Ship + Buttons", RETRO_GALAGA_IR },
+ 			{ "Classic",           RETROPAD_CLASSIC },
+ 			{ "Modern",            RETROPAD_MODERN },
+ 			{ "6-Button Panel",    RETROPAD_6PANEL },
+@@ -3187,7 +3194,8 @@ static void SetFakeInputDescriptors()
+ 	// WIP : if left analog mapped but not dpad, or reverse, do something to dual map
+ 	for (int i = 0; i < MAX_PLAYERS; i++) {
+ 		// dual mapping for those devices doesn't make much sense
+-		if (nDeviceType[i] == RETROMOUSE_BALL
++		if (nDeviceType[i] == RETRO_GALAGA_IR
++		 || nDeviceType[i] == RETROMOUSE_BALL
+ 		 || nDeviceType[i] == RETROMOUSE_FULL
+ 		 || nDeviceType[i] == RETRO_DEVICE_POINTER
+ 		 || nDeviceType[i] == RETROARCADE_GUN
+@@ -3367,6 +3375,12 @@ void InputMake(void)
+ 	}
+ 
+ 	poll_cb();
++ for (unsigned p=0;p<2;p++)
++   GalagaIRSetInput(p,nDeviceType[p]==RETRO_GALAGA_IR,
++     input_cb_wrapper(p,RETRO_DEVICE_ANALOG,RETRO_DEVICE_INDEX_ANALOG_LEFT,RETRO_DEVICE_ID_ANALOG_X),
++     input_cb_wrapper(p,RETRO_DEVICE_ANALOG,RETRO_DEVICE_INDEX_ANALOG_LEFT,RETRO_DEVICE_ID_ANALOG_Y),
++     input_cb_wrapper(p,RETRO_DEVICE_JOYPAD,0,RETRO_DEVICE_ID_JOYPAD_B)!=0);
++
+ 
+ 	if (PollDiagInput())
+ 		return;
+@@ -3598,7 +3612,7 @@ void retro_set_controller_port_device(unsigned port, unsigned device)
+ 				device != RETRO_DEVICE_POINTER &&
+ 				device != RETRO_DEVICE_TOUCHSCREEN &&
+ 				device != RETRO_DEVICE_LIGHTGUN &&
+-				device != RETROARCADE_GUN)
++				device != RETROARCADE_GUN && device != RETRO_GALAGA_IR)
+ 			{
+ 				device = RETROPAD_CLASSIC;
+ 				HandleMessage(RETRO_LOG_INFO, "[FBNeo] Unknown device type for port %d, forcing \"Classic\" instead\n", port);
+@@ -3606,7 +3620,7 @@ void retro_set_controller_port_device(unsigned port, unsigned device)
+ 		}
+ 	}
+ 
+-	if (port < nMaxControllers && nDeviceType[port] != device)
++	if (port < MAX_PLAYERS && nDeviceType[port] != device)
+ 	{
+ 		nDeviceType[port] = device;
+ 		bControllersNeedRefresh = true;
+diff --git a/src/burner/libretro/retro_input.h b/src/burner/libretro/retro_input.h
+index 712d14d29..030020020 100644
+--- a/src/burner/libretro/retro_input.h
++++ b/src/burner/libretro/retro_input.h
+@@ -32,6 +32,7 @@ extern retro_input_state_t input_cb;
+ #define SWITCH_NCODE_RESET  (MAX_KEYBINDS+1) // fixed switch ncode for reset button
+ #define SWITCH_NCODE_DIAG   (MAX_KEYBINDS+2) // fixed switch ncode for diag button
+ 
++#define RETRO_GALAGA_IR RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 20)
+ #define RETROPAD_CLASSIC         RETRO_DEVICE_ANALOG
+ #define RETROPAD_6PANEL          RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_ANALOG, 0)
+ #define RETROPAD_MODERN          RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_ANALOG, 1)
+diff --git a/src/burn/galaga_ir.h b/src/burn/galaga_ir.h
+new file mode 100644
+--- /dev/null
++++ b/src/burn/galaga_ir.h
+@@ -0,0 +1,10 @@
++#ifndef GALAGA_IR_H
++#define GALAGA_IR_H
++extern bool GalagaIRUnlimitedLives;
++extern bool GalagaIRInvincible;
++extern bool GalagaIRDoubleFighter;
++void GalagaIRSetInput(unsigned port, bool enabled, int x, int y, bool fire);
++bool ArcadeIREnabled(unsigned port);
++int ArcadeIRAxis(unsigned port, unsigned axis);
++bool ArcadeIRFire(unsigned port);
++#endif
+diff --git a/src/burner/libretro/Makefile.galaga_ir b/src/burner/libretro/Makefile.galaga_ir
+new file mode 100644
+--- /dev/null
++++ b/src/burner/libretro/Makefile.galaga_ir
+@@ -0,0 +1,72 @@
++# FBNeo IR shooter subset: Galaga, Galaxian, Invaders, Gaplus, Galaga 88
++# Support infrastructure retained from the upstream pre68k subset.
++
++SOURCES_C += $(FBNEO_BURN_SND_DIR)/fm.c \
++	$(FBNEO_BURN_SND_DIR)/fmopl.c \
++	$(FBNEO_BURN_SND_DIR)/ay8910.c \
++	$(FBNEO_BURN_SND_DIR)/ymdeltat.c \
++	$(FBNEO_BURN_SND_DIR)/ym2151.c
++
++SOURCES_CXX += $(FBNEO_CPU_DIR)/h6280_intf.cpp \
++	$(FBNEO_CPU_DIR)/hd6309_intf.cpp \
++	$(FBNEO_CPU_DIR)/m6502_intf.cpp \
++	$(FBNEO_CPU_DIR)/m6800_intf.cpp \
++	$(FBNEO_CPU_DIR)/m6809_intf.cpp \
++	$(FBNEO_CPU_DIR)/s2650_intf.cpp \
++	$(FBNEO_CPU_DIR)/z80_intf.cpp \
++	$(Z80_CPU_DIR)/z80.cpp \
++	$(Z80_CPU_DIR)/z80ctc.cpp \
++	$(Z80_CPU_DIR)/z80daisy.cpp \
++	$(Z80_CPU_DIR)/z80pio.cpp \
++	$(M6502_CPU_DIR)/m6502.cpp \
++	$(M6800_CPU_DIR)/m6800.cpp \
++	$(M6809_CPU_DIR)/m6809.cpp \
++	$(F8_CPU_DIR)/f8.cpp \
++	$(H6280_CPU_DIR)/h6280.cpp \
++	$(HD6309_CPU_DIR)/hd6309.cpp \
++	$(S2650_CPU_DIR)/s2650.cpp \
++	$(I8X41_CPU_DIR)/mcs48.cpp \
++	$(I8039_CPU_DIR)/i8039.cpp \
++	$(I8051_CPU_DIR)/mcs51.cpp \
++	$(FBNEO_BURN_DIR)/burn_bitmap.cpp \
++	$(FBNEO_BURN_DIR)/burn_pal.cpp \
++	$(FBNEO_BURN_DIR)/tilemap_generic.cpp \
++	$(FBNEO_BURN_DIR)/tiles_generic.cpp \
++	$(FBNEO_BURN_DEVICES_DIR)/earom.cpp \
++	$(FBNEO_BURN_DEVICES_DIR)/joyprocess.cpp \
++	$(FBNEO_BURN_DEVICES_DIR)/8255ppi.cpp \
++	$(FBNEO_BURN_DEVICES_DIR)/i2ceeprom.cpp \
++	$(FBNEO_BURN_DEVICES_DIR)/resnet.cpp \
++	$(FBNEO_BURN_DEVICES_DIR)/tms9928a.cpp \
++	$(FBNEO_BURN_DEVICES_DIR)/watchdog.cpp \
++	$(FBNEO_BURN_SND_DIR)/burn_ym2151.cpp \
++	$(FBNEO_BURN_SND_DIR)/burn_ym2203.cpp \
++	$(FBNEO_BURN_SND_DIR)/burn_ym2608.cpp \
++	$(FBNEO_BURN_SND_DIR)/burn_ym2610.cpp \
++	$(FBNEO_BURN_SND_DIR)/burn_ym2612.cpp \
++	$(FBNEO_BURN_SND_DIR)/burn_ym3526.cpp \
++	$(FBNEO_BURN_SND_DIR)/burn_ym3812.cpp \
++	$(FBNEO_BURN_SND_DIR)/dac.cpp \
++	$(FBNEO_BURN_SND_DIR)/digitalk.cpp \
++	$(FBNEO_BURN_SND_DIR)/flt_rc.cpp \
++	$(FBNEO_BURN_SND_DIR)/msm5205.cpp \
++	$(FBNEO_BURN_SND_DIR)/msm6295.cpp \
++	$(FBNEO_BURN_SND_DIR)/pokey.cpp \
++	$(FBNEO_BURN_SND_DIR)/samples.cpp \
++	$(FBNEO_BURN_SND_DIR)/sn76496.cpp
++
++CFLAGS += -DSUBSET=\"$(SUBSET)\" -DSUPPORT_SPLIT_DRIVER -DBUILD_PRE90S -DBUILD_GALAGA_IR
++CXXFLAGS += -DSUBSET=\"$(SUBSET)\" -DSUPPORT_SPLIT_DRIVER -DBUILD_PRE90S -DBUILD_GALAGA_IR
++
++SOURCES_CXX += $(PRE90S_DIR)/d_galaga.cpp $(FBNEO_BURN_DIR)/burn_sha1.cpp $(FBNEO_BURNER_DIR)/cdlist.cpp
++SOURCES_CXX += $(FBNEO_BURN_SND_DIR)/namco_snd.cpp
++
++ifeq ($(platform),win)
++LDFLAGS += -static
++endif
++
++SOURCES_CXX += $(PRE90S_DIR)/d_invaders.cpp $(PRE90S_DIR)/d_gaplus.cpp $(PRE90S_DIR)/d_namcos1.cpp \
++ $(GALAXIAN_DIR)/d_galaxian.cpp $(GALAXIAN_DIR)/gal_run.cpp $(GALAXIAN_DIR)/gal_gfx.cpp $(GALAXIAN_DIR)/gal_sound.cpp $(GALAXIAN_DIR)/gal_stars.cpp \
++ $(FBNEO_BURN_DEVICES_DIR)/namcoio.cpp $(FBNEO_CPU_DIR)/mb88xx/mb88xx.cpp
++
++SOURCES_CXX += $(GALAXIAN_DIR)/cclimber_audio.cpp

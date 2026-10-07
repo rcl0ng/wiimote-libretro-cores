@@ -1,0 +1,1 @@
+PASS: M.A.C.S. endpoints and trigger press/release; independent gun endpoints, 1000 held-P2 frames, per-player reload, Scope turbo rising edge.

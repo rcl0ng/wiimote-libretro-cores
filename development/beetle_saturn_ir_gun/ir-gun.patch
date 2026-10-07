@@ -1,0 +1,234 @@
+diff --git a/Makefile b/Makefile
+index d4231ed..018db3a 100644
+--- a/Makefile
++++ b/Makefile
+@@ -54,7 +54,7 @@ NEED_BPP = 32
+ NEED_DEINTERLACER = 1
+ NEED_THREADING = 1
+ CORE_DEFINE :=
+-TARGET_NAME := mednafen_saturn
++TARGET_NAME := beetle_saturn_ir_gun
+ 
+ ifeq ($(HAVE_OPENGL),1)
+    TARGET_NAME := mednafen_saturn_hw
+@@ -389,7 +389,7 @@ else
+    CC ?= gcc
+    CXX ?= g++
+    SHARED := -shared -Wl,--no-undefined -Wl,--version-script=link.T
+-   LDFLAGS += -static-libgcc -static-libstdc++ -lwinmm
++   LDFLAGS += -static -static-libgcc -static-libstdc++ -lwinmm
+    ifeq ($(HAVE_OPENGL),1)
+       GL_LIB := -lopengl32
+    endif
+diff --git a/input.c b/input.c
+index 31dd16d..cc9d3fa 100644
+--- a/input.c
++++ b/input.c
+@@ -88,6 +88,12 @@ static uint32_t input_type[ MAX_CONTROLLERS ]	= {0};
+ #define INPUT_MODE_DEFAULT				0
+ #define INPUT_MODE_DEFAULT_3D_PAD		INPUT_MODE_3D_PAD_ANALOG
+ 
++/* Frontend assignments can precede game load. Defer SMPC binding until
++ * input_init, then restore the requested type after the default setup. */
++static unsigned requested_device[MAX_CONTROLLERS];
++static bool requested_valid[MAX_CONTROLLERS];
++static bool input_ready;
++
+ // Mode switch for 3D Control Pad (per player)
+ static uint16_t input_mode[ MAX_CONTROLLERS ] 		= {0};
+ static int16_t input_throttle_latch[ MAX_CONTROLLERS ]	= {0};
+@@ -145,6 +151,7 @@ extern int ActiveCartType;
+ #define RETRO_DEVICE_SS_MOUSE     RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_MOUSE, 0)
+ #define RETRO_DEVICE_SS_GUN_JP    RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_LIGHTGUN, 0)
+ #define RETRO_DEVICE_SS_GUN_US    RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_LIGHTGUN, 1)
++#define RETRO_DEVICE_SS_IR_GUN    RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 20)
+ /* Sega Saturn Keyboard (US 101-key PS/2 adapter).  The SMPC-side
+  * IODevice already exists in mednafen/ss/smpc_iodevice.c
+  * (IODevice_Keyboard_Create).  We expose it to RetroArch as a
+@@ -154,11 +161,12 @@ extern int ActiveCartType;
+  * the JP keyboard (separate IDII layout) if/when it's exposed. */
+ #define RETRO_DEVICE_SS_KEYBOARD  RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_KEYBOARD, 0)
+ 
+-enum { INPUT_DEVICE_TYPES_COUNT = 1 /*none*/ + 10 }; /* <-- update me! */
++enum { INPUT_DEVICE_TYPES_COUNT = 1 /*none*/ + 11 }; /* <-- update me! */
+ 
+ static const struct retro_controller_description input_device_types[ INPUT_DEVICE_TYPES_COUNT ] =
+ {
+ 	{ "Control Pad", RETRO_DEVICE_JOYPAD },
++	{ "Wiimote IR Gun", RETRO_DEVICE_SS_IR_GUN },
+ 	{ "3D Control Pad", RETRO_DEVICE_SS_3D_PAD },
+ 	{ "Virtua Gun", RETRO_DEVICE_SS_GUN_JP },
+ 	{ "Stunner", RETRO_DEVICE_SS_GUN_US },
+@@ -750,6 +758,11 @@ void input_init(void)
+ {
+ 	unsigned i;
+ 
++	input_ready = true;
++	memset(input_data, 0, sizeof(input_data));
++	memset(pointer_pressed, 0, sizeof(pointer_pressed));
++	geometry_width = geometry_height = 0;
++
+ 	// Initialise to default pad type and bind input buffers to SMPC emulation.
+ 	for ( i = 0; i < MAX_CONTROLLERS; ++i )
+ 	{
+@@ -762,6 +775,10 @@ void input_init(void)
+ 		SS_SetInput( i, "gamepad", (uint8_t*)&input_data[ i ] );
+ 	}
+ 
++	for (i = 0; i < MAX_CONTROLLERS; ++i)
++		if (requested_valid[i])
++			retro_set_controller_port_device(i, requested_device[i]);
++
+ 	/* Bind the ST-V misc-input port (test/service/pause/reset bits).
+ 	 * SS_SetInput routes port 12 to BOTH STVIO_SetInput (which sets
+ 	 * DPtr[12] = ptr) and SMPC_SetInput (which sets MiscInputPtr).
+@@ -776,6 +793,15 @@ void input_init(void)
+ 	}
+ }
+ 
++/* Called before tearing down SMPC; subsequent frontend assignments are
++ * remembered without touching unloaded emulation state. */
++void input_shutdown(bool clear_requests)
++{
++    input_ready = false;
++    if (clear_requests)
++        memset(requested_valid, 0, sizeof(requested_valid));
++}
++
+ void input_set_geometry(unsigned width, unsigned height)
+ {
+ 	geometry_width = width;
+@@ -906,6 +932,45 @@ static void poll_ss_keyboard( retro_input_state_t input_state_cb, unsigned iplay
+ 	}
+ }
+ 
++/* Absolute IR coordinates use the native Saturn gun's nominal units.
++ * Endpoints are valid onscreen positions, not an offscreen sentinel.
++ * No accumulator, smoothing or touchscreen release latch is involved. */
++static void input_update_ir_gun(retro_input_state_t cb, unsigned port,
++                                INPUT_DATA *out, bool bitmasks)
++{
++    uint16_t buttons = 0;
++    bool reload, trigger, start;
++    int x, y;
++    if (bitmasks)
++        buttons = (uint16_t)cb(port, RETRO_DEVICE_JOYPAD, 0,
++                              RETRO_DEVICE_ID_JOYPAD_MASK);
++    reload = bitmasks ? !!(buttons & (1u << RETRO_DEVICE_ID_JOYPAD_A)) :
++             !!cb(port, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A);
++    trigger = bitmasks ? !!(buttons & (1u << RETRO_DEVICE_ID_JOYPAD_B)) :
++              !!cb(port, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B);
++    start = bitmasks ? !!(buttons & (1u << RETRO_DEVICE_ID_JOYPAD_START)) :
++            !!cb(port, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START);
++    out->u8[4] = start ? 0x2 : 0;
++    if (reload || geometry_height == 0)
++    {
++        x = y = -16384;
++        if (reload) out->u8[4] |= 0x4;
++    }
++    else
++    {
++        int raw_x = cb(port, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT,
++                       RETRO_DEVICE_ID_ANALOG_X);
++        int raw_y = cb(port, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT,
++                       RETRO_DEVICE_ID_ANALOG_Y);
++        x = (int)(((int64_t)raw_x + 32768) * 21471 / 65535);
++        y = (int)(((int64_t)raw_y + 32768) * (geometry_height - 1) / 65535)
++            + (int)geometry_height - 240;
++        if (trigger) out->u8[4] |= 0x1;
++    }
++    out->gun_pos[0] = (uint16_t)x;
++    out->gun_pos[1] = (uint16_t)y;
++}
++
+ void input_update_with_bitmasks( retro_input_state_t input_state_cb )
+ {
+ 	unsigned iplayer;
+@@ -1354,6 +1419,10 @@ void input_update_with_bitmasks( retro_input_state_t input_state_cb )
+ 
+ 			break;
+ 
++		case RETRO_DEVICE_SS_IR_GUN:
++			input_update_ir_gun(input_state_cb, iplayer, p_input, true);
++			break;
++
+ 		case RETRO_DEVICE_SS_GUN_JP:
+ 		case RETRO_DEVICE_SS_GUN_US:
+ 
+@@ -1948,6 +2017,10 @@ void input_update( retro_input_state_t input_state_cb )
+ 
+ 			break;
+ 
++		case RETRO_DEVICE_SS_IR_GUN:
++			input_update_ir_gun(input_state_cb, iplayer, p_input, false);
++			break;
++
+ 		case RETRO_DEVICE_SS_GUN_JP:
+ 		case RETRO_DEVICE_SS_GUN_US:
+ 
+@@ -2168,6 +2241,12 @@ void retro_set_controller_port_device( unsigned in_port, unsigned device )
+ {
+ 	if ( in_port < MAX_CONTROLLERS )
+ 	{
++        requested_device[in_port] = device;
++        requested_valid[in_port] = true;
++        if (!input_ready) return;
++        memset(&input_data[in_port], 0, sizeof(input_data[in_port]));
++        pointer_pressed[in_port] = 0;
++
+ 		// Store input type
+ 		input_type[ in_port ] = device;
+ 		input_mode[ in_port ] = INPUT_MODE_DEFAULT;
+@@ -2212,6 +2291,11 @@ void retro_set_controller_port_device( unsigned in_port, unsigned device )
+ 			SS_SetInput( in_port, "mouse", (uint8_t*)&input_data[ in_port ] );
+ 			break;
+ 
++        case RETRO_DEVICE_SS_IR_GUN:
++            log_cb(RETRO_LOG_INFO, "Controller %u: Wiimote IR Gun\n", in_port + 1);
++            SS_SetInput(in_port, "gun", (uint8_t*)&input_data[in_port]);
++            break;
++
+ 		case RETRO_DEVICE_SS_GUN_US:
+ 			log_cb( RETRO_LOG_INFO, "Controller %u: Stunner\n", (in_port+1) );
+ 			SS_SetInput( in_port, "gun", (uint8_t*)&input_data[ in_port ] );
+diff --git a/input.h b/input.h
+index a505027..01ef330 100644
+--- a/input.h
++++ b/input.h
+@@ -19,6 +19,7 @@ extern "C" {
+ void input_init_env( retro_environment_t environ_cb );
+ 
+ void input_init(void);
++void input_shutdown(bool clear_requests);
+ 
+ void input_set_geometry( unsigned width, unsigned height );
+ 
+diff --git a/libretro.c b/libretro.c
+index 03e9c37..677a054 100644
+--- a/libretro.c
++++ b/libretro.c
+@@ -53,7 +53,7 @@
+ #include "input.h"
+ #include "disc.h"
+ 
+-#define MEDNAFEN_CORE_NAME                   "Beetle Saturn"
++#define MEDNAFEN_CORE_NAME                   "Beetle Saturn IR Gun"
+ #define MEDNAFEN_CORE_VERSION                "v1.32.1"
+ #define MEDNAFEN_CORE_VERSION_NUMERIC        0x00103201
+ #define MEDNAFEN_CORE_EXTENSIONS             "cue|ccd|chd|toc|m3u|zip"
+@@ -1403,6 +1403,7 @@ bool retro_load_game(const struct retro_game_info *info)
+ 
+ void retro_unload_game(void)
+ {
++   input_shutdown(false);
+ #ifdef SS_DIAG_COUNTERS
+    if (getenv("SS_DIAG"))
+    {
+@@ -1764,6 +1765,7 @@ void retro_get_system_av_info(struct retro_system_av_info *info)
+ 
+ void retro_deinit(void)
+ {
++   input_shutdown(true);
+    MDFN_Surface_Delete(surf);
+    surf = NULL;
+ 

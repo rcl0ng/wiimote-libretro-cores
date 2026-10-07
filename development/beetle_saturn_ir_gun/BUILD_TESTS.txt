@@ -1,0 +1,9 @@
+From the extracted source directory:
+make -j6 HAVE_CDROM=0
+cc -O2 -ffunction-sections -fdata-sections -DSTDC_HEADERS -D__LIBRETRO__ \
+  -I. -Ilibretro-common/include -Imednafen -Imednafen/include \
+  ir-routing-test.c libretro_settings.c -Wl,--gc-sections -o ir-routing-test
+./ir-routing-test
+
+The input test includes the actual input.c translation unit. Peripheral
+binding is mocked; it does not simulate game rendering or calibration.

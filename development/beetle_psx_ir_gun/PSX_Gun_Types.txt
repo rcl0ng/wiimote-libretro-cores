@@ -1,0 +1,63 @@
+PSX GUN TYPES - PRACTICAL SETUP GUIDE
+For original, unpatched games. GunCon patches can change the required type.
+Choose the Wiimote IR version of the listed device in this custom core.
+
+JUSTIFIER / HYPER BLASTER
+  Area 51
+  Crypt Killer
+  Die Hard Trilogy (first game; shooting portion)
+  Lethal Enforcers I & II
+  Project Horned Owl
+  Snatcher
+  Star Wars: Rebel Assault II (gun-enabled sections)
+
+GUNCON / G-CON 45
+  Time Crisis
+  Time Crisis: Project Titan (PS1 sequel; not PS2 Time Crisis II)
+  Point Blank / GunBullet
+  Point Blank 2 / GunBarl
+  Point Blank 3 / Gunbalina
+  Ghoul Panic / Oh! Bakyuuun
+  Gunfighter: The Legend of Jesse James
+  Extreme Ghostbusters: Ultimate Invasion
+  Galaxian 3
+  Judge Dredd
+  Rescue Shot
+  Resident Evil Survivor / Biohazard Gun Survivor (PAL/Japan only)
+  Moorhuhn series (check your particular release)
+
+BOTH TYPES SUPPORTED - TRY GUNCON FIRST
+  Die Hard Trilogy 2: Viva Las Vegas
+  Elemental Gearbolt
+  Maximum Force
+
+GUNCON CONFIRMED; SECOND-GUN-STANDARD REPORTS DIFFER
+  Mighty Hits Special: GunCon is a safe first choice. Sources differ on
+  whether Justifier is also supported; verify against your specific release.
+
+CHECK BEFORE ASSIGNING
+  Simple 1500 Series Vol.024 - The Gun Shooting
+  Simple 1500 Series Vol.063 - The Gun Shooting 2
+  These are lightgun titles, but the primary technical list used here does
+  not identify their protocol. Leave classification unconfirmed for now.
+  Silent Hill's Justifier support is an easter egg, not normal gun gameplay.
+  Dragon Quest Monsters contains gun-related code; practical use is unclear.
+
+REGION/PATCH NOTES
+  The original USA Resident Evil Survivor release lacks lightgun support.
+  Do not select a gun just because a game is a rail shooter.
+  If your game has a fan GunCon patch, follow that patch's device instructions.
+  In-game calibration may still be needed after selecting the correct type.
+
+WIIMOTE BUTTONS IN THIS BUILD
+  Both types: left analog absolute aim; B trigger; A offscreen shot/reload.
+  GunCon: 1 = gun A (cover/action in Time Crisis), 2 = gun B.
+          + also sends gun B; GunCon has no dedicated Start button.
+  Justifier: 1 = auxiliary button; + = Start. 2 is unused.
+  Minus and Home are not assigned gun actions.
+
+SOURCE
+  PSX-SPX hardware/protocol research (IRQ10 = Justifier; Cinch = GunCon):
+  https://psx-spx.consoledev.net/ps1/sio/controllersandmemorycards/controllers-lightguns-psx-lightgun-games/
+  This is a setup reference, not a claim that every game has been tested
+  with our custom core. Dual support and regional releases warrant testing.

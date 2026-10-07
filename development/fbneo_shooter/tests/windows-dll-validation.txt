@@ -1,0 +1,6 @@
+PASS Windows PE x86-64 architecture
+PASS required libretro exports
+PASS static runtime linking; imports:
+DLL Name: KERNEL32.dll
+DLL Name: msvcrt.dll
+Windows hardware play testing remains with the user.

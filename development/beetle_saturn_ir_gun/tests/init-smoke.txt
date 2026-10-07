@@ -1,0 +1,1 @@
+PASS: full native core init, pre-content two IR assignments, native restoration, deinit without BIOS/game.

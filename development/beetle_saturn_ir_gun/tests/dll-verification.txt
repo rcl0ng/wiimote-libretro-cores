@@ -1,0 +1,2 @@
+PASS: Windows x64 DLL; required libretro exports present.
+Imports: KERNEL32.dll, msvcrt.dll

@@ -1,0 +1,163 @@
+diff --git a/Makefile.libretro b/Makefile.libretro
+index 5b90d40..8cefe45 100644
+--- a/Makefile.libretro
++++ b/Makefile.libretro
+@@ -49,7 +49,7 @@ else ifneq ($(findstring MINGW,$(shell uname -a)),)
+ 	system_platform = win
+ endif
+ 
+-TARGET_NAME := fceumm
++TARGET_NAME := fceumm_ir_gun
+ GIT_VERSION := " $(shell git rev-parse --short HEAD || echo unknown)"
+ ifneq ($(GIT_VERSION)," unknown")
+ 	CFLAGS += -DGIT_VERSION=\"$(GIT_VERSION)\"
+diff --git a/src/drivers/libretro/libretro.c b/src/drivers/libretro/libretro.c
+index 3485976..d49e41e 100644
+--- a/src/drivers/libretro/libretro.c
++++ b/src/drivers/libretro/libretro.c
+@@ -113,6 +113,8 @@ typedef uint16_t bpp_t;
+ 
+ #define RETRO_DEVICE_AUTO         RETRO_DEVICE_JOYPAD
+ #define RETRO_DEVICE_GAMEPAD      RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 1)
++#define RETRO_DEVICE_IR_ZAPPER RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 20)
++static unsigned ir_devices[5] = { RETRO_DEVICE_JOYPAD, RETRO_DEVICE_JOYPAD, RETRO_DEVICE_JOYPAD, RETRO_DEVICE_JOYPAD, RETRO_DEVICE_JOYPAD };
+ #define RETRO_DEVICE_ZAPPER       RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_MOUSE,  0)
+ #define RETRO_DEVICE_ARKANOID     RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_MOUSE,  1)
+ #define RETRO_DEVICE_POWERPADA    RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_KEYBOARD, 0)
+@@ -1505,7 +1507,7 @@ static unsigned fc_to_libretro(int d)
+    return (RETRO_DEVICE_NONE);
+ }
+ 
+-void retro_set_controller_port_device(unsigned port, unsigned device)
++static void set_native_controller(unsigned port, unsigned device)
+ {
+    if (port < 5)
+    {
+@@ -1557,6 +1559,35 @@ void retro_set_controller_port_device(unsigned port, unsigned device)
+    }
+ }
+ 
++/* Frontend port 0 supplies both physical NES devices. */
++static void apply_ir_hybrid(void)
++{
++   update_nes_controllers(0, RETRO_DEVICE_GAMEPAD);
++   update_nes_controllers(1, RETRO_DEVICE_ZAPPER);
++   nes_input.type[2] = nes_input.type[3] = RETRO_DEVICE_NONE;
++   update_nes_controllers(4, RETRO_DEVICE_NONE);
++   FCEUI_DisableFourScore(1);
++   switchZapper = 0;
++}
++
++void retro_set_controller_port_device(unsigned port, unsigned device)
++{
++   bool restore;
++   if (port >= 5) return;
++   restore = port == 0 && ir_devices[0] == RETRO_DEVICE_IR_ZAPPER && device != RETRO_DEVICE_IR_ZAPPER;
++   ir_devices[port] = device;
++   if (!GameInfo) return; /* Connect after retro_load_game creates the game. */
++   if (device != RETRO_DEVICE_IR_ZAPPER)
++      set_native_controller(port, device);
++   if (ir_devices[0] == RETRO_DEVICE_IR_ZAPPER)
++      apply_ir_hybrid();
++   else if (restore)
++   {
++      unsigned i;
++      for (i = 1; i < 5; ++i) set_native_controller(i, ir_devices[i]);
++   }
++}
++
+ /* Core options 'update display' callback */
+ static bool update_option_visibility(void)
+ {
+@@ -1762,6 +1793,7 @@ void retro_set_environment(retro_environment_t cb)
+    struct retro_vfs_interface_info vfs_iface_info;
+ 
+    static const struct retro_controller_description pads1[] = {
++      { "Wiimote IR Zapper + Gamepad", RETRO_DEVICE_IR_ZAPPER },
+       { "Auto",    RETRO_DEVICE_AUTO },
+       { "Gamepad", RETRO_DEVICE_GAMEPAD },
+       { "Zapper",  RETRO_DEVICE_ZAPPER },
+@@ -1805,7 +1837,7 @@ void retro_set_environment(retro_environment_t cb)
+    };
+ 
+    static const struct retro_controller_info ports[] = {
+-      { pads1, 3 },
++      { pads1, 4 },
+       { pads2, 6 },
+       { pads3, 4 },
+       { pads4, 2 },
+@@ -1850,7 +1882,7 @@ void retro_get_system_info(struct retro_system_info *info)
+ #else
+    info->library_version  = "(SVN)";
+ #endif
+-   info->library_name     = "FCEUmm";
++   info->library_name     = "FCEUmm IR Gun";
+    info->block_extract    = false;
+ }
+ 
+@@ -1908,6 +1940,8 @@ static void check_system_specs(void)
+ 
+ void retro_init(void)
+ {
++   unsigned ir_port;
++   for (ir_port = 0; ir_port < 5; ++ir_port) ir_devices[ir_port] = RETRO_DEVICE_AUTO;
+    bool achievements = true;
+    log_cb.log=default_logger;
+    environ_cb(RETRO_ENVIRONMENT_GET_LOG_INTERFACE, &log_cb);
+@@ -2897,6 +2931,26 @@ static void get_mouse_input(unsigned port, uint32_t variant, uint32_t *mousedata
+    }
+ }
+ 
++static void update_ir_zapper(void)
++{
++   uint32_t *data = nes_input.MouseData[1];
++   int x = input_cb(0, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_X);
++   int y = input_cb(0, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_Y);
++   int w = NES_WIDTH - crop_overscan_h_left - crop_overscan_h_right;
++   int h = NES_HEIGHT - crop_overscan_v_top - crop_overscan_v_bottom;
++   bool away = input_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A) != 0;
++   data[0] = crop_overscan_h_left + ((x + 32768) * (w - 1)) / 65535;
++   data[1] = crop_overscan_v_top + ((y + 32768) * (h - 1)) / 65535;
++   data[2] = input_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B) ? 1 : 0;
++   data[3] = 0;
++   if (away)
++   {
++      data[0] = NES_WIDTH;
++      data[1] = NES_HEIGHT;
++      data[2] |= 2; /* Native Zapper away-trigger bit: trigger with no light. */
++   }
++}
++
+ static void FCEUD_UpdateInput(void)
+ {
+    unsigned player, port;
+@@ -2904,6 +2958,7 @@ static void FCEUD_UpdateInput(void)
+    bool palette_next = false;
+ 
+    poll_cb();
++   if (ir_devices[0] == RETRO_DEVICE_IR_ZAPPER) switchZapper = 0;
+ 
+    /* Reset input states */
+    nes_input.JSReturn = 0;
+@@ -3042,6 +3097,9 @@ static void FCEUD_UpdateInput(void)
+          case RETRO_DEVICE_ARKANOID:
+          case RETRO_DEVICE_FC_ARKANOID:
+          case RETRO_DEVICE_ZAPPER:
++            if (port == 1 && ir_devices[0] == RETRO_DEVICE_IR_ZAPPER)
++               update_ir_zapper();
++            else
+                get_mouse_input(port, nes_input.type[port], nes_input.MouseData[port]);
+             break;
+       }
+@@ -4201,6 +4259,11 @@ bool retro_load_game(const struct retro_game_info *info)
+       nes_input.type[i] = RETRO_DEVICE_JOYPAD;
+    }
+ 
++   if (ir_devices[0] == RETRO_DEVICE_IR_ZAPPER) apply_ir_hybrid();
++   else
++      for (i = 0; i < 5; ++i)
++         if (ir_devices[i] != RETRO_DEVICE_AUTO) set_native_controller(i, ir_devices[i]);
++
+    external_palette_exist = palette_game_available;
+    if (external_palette_exist)
+       FCEU_printf(" Loading custom palette: %s%cnes.pal\n",

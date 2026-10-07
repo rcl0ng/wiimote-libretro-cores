@@ -1,0 +1,112 @@
+diff --git a/Makefile b/Makefile
+index 9dbd0be..473a63e 100644
+--- a/Makefile
++++ b/Makefile
+@@ -74,7 +74,7 @@ NEED_BPP = 32
+ NEED_DEINTERLACER = 1
+ NEED_THREADING = 1
+ SET_HAVE_HW = 0
+-TARGET_NAME := mednafen_psx
++TARGET_NAME := beetle_psx_ir_gun
+ 
+ ifeq ($(HAVE_HW), 1)
+    HAVE_VULKAN = 1
+@@ -508,7 +508,7 @@ else
+    CXX     ?= g++
+    IS_X86   = 1
+    SHARED  := -shared -Wl,--no-undefined -Wl,--version-script=link.T
+-   LDFLAGS += -static-libgcc -static-libstdc++ -lwinmm
++   LDFLAGS += -static -static-libgcc -static-libstdc++ -lwinmm
+    HAVE_CDROM = 1
+ 
+    ifeq ($(HAVE_OPENGL),1)
+diff --git a/input.c b/input.c
+index 4c7dc62..ce61269 100644
+--- a/input.c
++++ b/input.c
+@@ -82,6 +82,7 @@ static uint32_t input_type[ MAX_CONTROLLERS ] = {0};
+ static uint32_t requested_input_type[ MAX_CONTROLLERS ] = {0};
+ static uint32_t compatibility_controller_mask[ MAX_CONTROLLERS ] = {0};
+ static bool input_types_initialized = false;
++static bool ir_gun_enabled[MAX_CONTROLLERS] = {false};
+ 
+ static void update_input_descriptors(void);
+ static void input_apply_controller_port_device(
+@@ -97,6 +98,8 @@ static const struct retro_controller_description input_device_types[] =
+    { "DualShock", RETRO_DEVICE_PS_DUALSHOCK },
+    { "Analog Controller", RETRO_DEVICE_PS_ANALOG },
+    { "Analog Joystick", RETRO_DEVICE_PS_ANALOG_JOYSTICK },
++   { "Wiimote IR GunCon", RETRO_DEVICE_PS_IR_GUNCON },
++   { "Wiimote IR Justifier", RETRO_DEVICE_PS_IR_JUSTIFIER },
+    { "Guncon / G-Con 45", RETRO_DEVICE_PS_GUNCON },
+    { "Justifier", RETRO_DEVICE_PS_JUSTIFIER },
+    { "Mouse", RETRO_DEVICE_PS_MOUSE },
+@@ -784,6 +787,35 @@ static void input_handle_lightgun( INPUT_DATA *p_input, int iplayer, retro_input
+    }
+ }
+ 
++static void input_handle_ir_gun(INPUT_DATA *p_input, unsigned player, retro_input_state_t cb)
++{
++   int x = cb(player, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_X);
++   int y = cb(player, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_Y);
++   bool reload = cb(player, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A) != 0;
++   int scale_x = crop_overscan ? 2560 : 2800;
++   int scale_y = content_is_pal ? 288 : 240;
++   p_input->gun_pos[0] = ((x + 32768) * scale_x) / 65535 + (crop_overscan ? 120 : 0);
++   p_input->gun_pos[1] = ((y + 32768) * scale_y) / 65535 + (content_is_pal ? 4 : 0);
++   p_input->u8[4] = 0;
++   if (reload)
++   {
++      p_input->gun_pos[0] = p_input->gun_pos[1] = (uint16_t)-16384;
++      p_input->u8[4] = 0x8; /* Native offscreen-shot flag. */
++   }
++   else if (cb(player, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B))
++      p_input->u8[4] = 0x1;
++   if (cb(player, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X))
++      p_input->u8[4] |= 0x2;
++   if (input_type[player] == RETRO_DEVICE_PS_JUSTIFIER)
++   {
++      if (cb(player, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START))
++         p_input->u8[4] |= 0x4;
++   }
++   else if (cb(player, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y) ||
++            cb(player, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START))
++      p_input->u8[4] |= 0x4;
++}
++
+ void input_update(bool libretro_supports_bitmasks, retro_input_state_t input_state_cb )
+ {
+    unsigned i;
+@@ -829,6 +861,11 @@ void input_update(bool libretro_supports_bitmasks, retro_input_state_t input_sta
+ 
+          case RETRO_DEVICE_PS_GUNCON:
+          case RETRO_DEVICE_PS_JUSTIFIER:
++            if (ir_gun_enabled[iplayer])
++            {
++               input_handle_ir_gun(p_input, iplayer, input_state_cb);
++               break;
++            }
+             if ( gun_input_mode == SETTING_GUN_INPUT_POINTER )
+                input_handle_lightgun_touchscreen( p_input, iplayer, input_state_cb );
+             else
+@@ -1386,6 +1423,9 @@ void retro_set_controller_port_device( unsigned in_port, unsigned device )
+       return;
+ 
+    input_initialize_types();
++   ir_gun_enabled[in_port] = device == RETRO_DEVICE_PS_IR_GUNCON || device == RETRO_DEVICE_PS_IR_JUSTIFIER;
++   if (device == RETRO_DEVICE_PS_IR_GUNCON) device = RETRO_DEVICE_PS_GUNCON;
++   else if (device == RETRO_DEVICE_PS_IR_JUSTIFIER) device = RETRO_DEVICE_PS_JUSTIFIER;
+    requested_input_type[in_port] = device;
+    effective_device = input_effective_controller_port_device(in_port);
+ 
+diff --git a/input.h b/input.h
+index e90fe4b..473c353 100644
+--- a/input.h
++++ b/input.h
+@@ -61,3 +61,6 @@ extern int gun_input_mode;
+ #endif
+ 
+ #endif
++
++#define RETRO_DEVICE_PS_IR_GUNCON RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD,20)
++#define RETRO_DEVICE_PS_IR_JUSTIFIER RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD,21)

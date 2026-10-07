@@ -1,0 +1,71 @@
+--- a/libretro/libretro.cpp
++++ b/libretro/libretro.cpp
+@@ -37,6 +37,7 @@
+ #define RETRO_DEVICE_LIGHTGUN_SUPER_SCOPE ((1 << 8) | RETRO_DEVICE_LIGHTGUN)
+ #define RETRO_DEVICE_LIGHTGUN_JUSTIFIER ((2 << 8) | RETRO_DEVICE_LIGHTGUN)
+ #define RETRO_DEVICE_LIGHTGUN_JUSTIFIER_2 ((3 << 8) | RETRO_DEVICE_LIGHTGUN)
++#define RETRO_DEVICE_IR_MACS RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 23)
+ #define RETRO_DEVICE_IR_SCOPE RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 20)
+ #define RETRO_DEVICE_IR_JUSTIFIER RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 21)
+ #define RETRO_DEVICE_IR_JUSTIFIER2 RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 22)
+@@ -280,6 +281,7 @@
+         { "SNES Joypad", RETRO_DEVICE_JOYPAD },
+         { "SNES Mouse", RETRO_DEVICE_MOUSE },
+         { "Multitap", RETRO_DEVICE_JOYPAD_MULTITAP },
++        { "Wiimote IR M.A.C.S. Rifle + Gamepad", RETRO_DEVICE_IR_MACS },
+         { "Wiimote IR Super Scope + Gamepad", RETRO_DEVICE_IR_SCOPE },
+         { "Wiimote IR Justifier + Gamepad", RETRO_DEVICE_IR_JUSTIFIER },
+     };
+@@ -307,7 +309,7 @@
+     };
+ 
+     static const struct retro_controller_info ports[] = {
+-        { port_1, 6 },
++        { port_1, 7 },
+         { port_2, 8 },
+         { port_3, 3 },
+         { port_extra, 2 },
+@@ -1183,6 +1185,7 @@
+         int offset = snes_devices[0] == RETRO_DEVICE_JOYPAD_MULTITAP ? 4 : 1;
+         switch (device)
+         {
++            case RETRO_DEVICE_IR_MACS:
+             case RETRO_DEVICE_IR_SCOPE:
+             case RETRO_DEVICE_IR_JUSTIFIER:
+             case RETRO_DEVICE_IR_JUSTIFIER2:
+@@ -1238,10 +1241,12 @@
+ 
+         // Reapply the physical SNES topology after every frontend assignment.
+         // Frontend port 0 supplies both the joypad and first gun.
+-        if (snes_devices[0] == RETRO_DEVICE_IR_SCOPE || snes_devices[0] == RETRO_DEVICE_IR_JUSTIFIER)
++        if (snes_devices[0] == RETRO_DEVICE_IR_MACS || snes_devices[0] == RETRO_DEVICE_IR_SCOPE || snes_devices[0] == RETRO_DEVICE_IR_JUSTIFIER)
+         {
+             S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
+-            if (snes_devices[0] == RETRO_DEVICE_IR_SCOPE)
++            if (snes_devices[0] == RETRO_DEVICE_IR_MACS)
++                S9xSetController(1, CTL_MACSRIFLE, 0, 0, 0, 0);
++            else if (snes_devices[0] == RETRO_DEVICE_IR_SCOPE)
+                 S9xSetController(1, CTL_SUPERSCOPE, 0, 0, 0, 0);
+             else
+                 S9xSetController(1, CTL_JUSTIFIER, snes_devices[1] == RETRO_DEVICE_IR_JUSTIFIER2, 0, 0, 0);
+@@ -2135,13 +2140,18 @@
+ static bool report_ir_hybrid()
+ {
+     unsigned device = snes_devices[0];
+-    if (device != RETRO_DEVICE_IR_SCOPE && device != RETRO_DEVICE_IR_JUSTIFIER)
++    if (device != RETRO_DEVICE_IR_MACS && device != RETRO_DEVICE_IR_SCOPE && device != RETRO_DEVICE_IR_JUSTIFIER)
+         return false;
+     int16_t bits = 0;
+     for (int i = 0; i < RETRO_PAD_ID_COUNT; ++i)
+         if (ir_button(0, i)) bits |= 1 << i;
+     S9xSetJoypadButtons(0, snes_pad_mask(bits));
+-    if (device == RETRO_DEVICE_IR_SCOPE)
++    if (device == RETRO_DEVICE_IR_MACS)
++    {
++        ir_gun_position(0, BTN_POINTER);
++        report_button(MAKE_BUTTON(PAD_2, MACS_RIFLE_TRIGGER), ir_button(0, RETRO_DEVICE_ID_JOYPAD_B));
++    }
++    else if (device == RETRO_DEVICE_IR_SCOPE)
+     {
+         ir_gun_position(0, BTN_POINTER);
+         bool turbo = ir_button(0, RETRO_DEVICE_ID_JOYPAD_Y);

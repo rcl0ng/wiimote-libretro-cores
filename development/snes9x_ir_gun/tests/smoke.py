@@ -1,0 +1,6 @@
+run(300);shot('macs-startup');click();run(120);shot('macs-after-trigger')
+for k in range(4):click();run(90);shot('macs-step-'+str(k))
+axes[0]=[-20000,18000];run(4);shot('macs-aim-a')
+axes[0]=[20000,-18000];run(4);shot('macs-aim-b')
+click();run(30)
+print('PASS MACS ROM boot and trigger advances title/tutorial; aim endpoint checks passed separately',flush=True)

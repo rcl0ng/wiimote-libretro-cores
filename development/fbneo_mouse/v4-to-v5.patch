@@ -1,0 +1,155 @@
+--- a/src/burner/libretro/Makefile.mouse
++++ b/src/burner/libretro/Makefile.mouse
+@@ -2,17 +2,8 @@
+ SOURCES_CXX := $(filter-out $(wildcard $(FBNEO_BURN_DIR)/drv/*/*.cpp),$(SOURCES_CXX))
+ SOURCES_CXX += $(ATARI_DIR)/d_missile.cpp $(FBNEO_BURN_DIR)/drv/pre90s/d_millipede.cpp $(FBNEO_BURN_DIR)/drv/taito/d_arkanoid.cpp
+ SOURCES_CXX += $(FBNEO_CPU_DIR)/m6805_intf.cpp $(FBNEO_CPU_DIR)/m6805/m6805.cpp $(FBNEO_BURN_DEVICES_DIR)/taito_m68705.cpp
+-CFLAGS += -DSUPPORT_SPLIT_DRIVER
+-CXXFLAGS += -DSUPPORT_SPLIT_DRIVER
+-SOURCES_CXX += $(FBNEO_BURN_DIR)/burn_sha1.cpp
+-
+-SOURCES_C += $(M68K_CPU_DIR)/m68kcpu.c $(M68K_CPU_DIR)/m68kops.c $(FBNEO_BURN_SND_DIR)/ym2413.c
+-SOURCES_CXX += $(FBNEO_CPU_DIR)/m68000_intf.cpp $(FBNEO_BURN_DIR)/vector.cpp
+-SOURCES_CXX += $(FBNEO_BURN_DEVICES_DIR)/avgdvg.cpp $(FBNEO_BURN_DEVICES_DIR)/atariic.cpp $(FBNEO_BURN_DEVICES_DIR)/atarimo.cpp $(FBNEO_BURN_DEVICES_DIR)/eeprom.cpp $(FBNEO_BURN_DEVICES_DIR)/tms34061.cpp
+-SOURCES_CXX += $(FBNEO_BURN_SND_DIR)/burn_ym2413.cpp
+-SOURCES_CXX += $(FBNEO_BURN_DIR)/drv/taito/d_tnzs.cpp $(FBNEO_BURN_DIR)/drv/pre90s/d_quantum.cpp $(ATARI_DIR)/d_shuuz.cpp $(FBNEO_BURN_DIR)/drv/pre90s/d_capbowl.cpp
+-SOURCES_CXX += $(FBNEO_BURN_DEVICES_DIR)/slapstic.cpp $(FBNEO_BURN_DEVICES_DIR)/atarivad.cpp $(FBNEO_BURN_DIR)/drv/taito/tnzs_prot.cpp
+-
+-SOURCES_CXX += $(ATARI_DIR)/d_rampart.cpp $(ATARI_DIR)/d_atarisy1.cpp $(FBNEO_BURN_DIR)/drv/pst90s/d_itech32.cpp
+-SOURCES_CXX += $(FBNEO_BURN_DEVICES_DIR)/atarijsa.cpp $(FBNEO_BURN_DEVICES_DIR)/timekpr.cpp $(FBNEO_BURN_SND_DIR)/es5506.cpp
+-SOURCES_CXX += $(FBNEO_BURN_DEVICES_DIR)/dtimer.cpp $(FBNEO_BURN_SND_DIR)/tms5220.cpp
++CFLAGS := $(filter-out -DNO_NEOGEO,$(CFLAGS))
++CXXFLAGS := $(filter-out -DNO_NEOGEO,$(CXXFLAGS))
++include Makefile.neogeo
++SOURCES_C := $(sort $(SOURCES_C))
++SOURCES_CXX := $(sort $(SOURCES_CXX))
+--- a/src/burner/libretro/libretro.cpp
++++ b/src/burner/libretro/libretro.cpp
+@@ -449,7 +449,7 @@
+ 	sprintf(library_version, "v%x.%x.%x.%02x %s %s", nBurnVer >> 20, (nBurnVer >> 16) & 0x0F, (nBurnVer >> 8) & 0xFF, nBurnVer & 0xFF, GIT_DATE, GIT_VERSION);
+ 
+ 	info->library_name = APP_TITLE;
+-    info->library_version = "IR Mouse v4";
++    info->library_version = "IR Mouse v5";
+ 	
+ 	info->need_fullpath = true;
+ 	info->block_extract = true;
+--- a/src/burner/libretro/retro_input.cpp
++++ b/src/burner/libretro/retro_input.cpp
+@@ -3504,7 +3504,7 @@
+             if (diagnostics && !irDiagnosticFile) {
+                 char path[MAX_PATH]; snprintf(path,sizeof(path),"%s%cfbneo-ir-mouse.log",g_save_dir,PATH_DEFAULT_SLASH_C());
+                 irDiagnosticFile=filestream_open(path,RETRO_VFS_FILE_ACCESS_WRITE,RETRO_VFS_FILE_ACCESS_HINT_NONE);
+-                if (irDiagnosticFile) filestream_printf(irDiagnosticFile,"FBNeo IR Mouse v4 game=%s\nframe raw_x raw_y target_x target_y actual_x actual_y step_x step_y profile\n",game);
++                if (irDiagnosticFile) filestream_printf(irDiagnosticFile,"FBNeo IR Mouse v5 game=%s\nframe raw_x raw_y target_x target_y actual_x actual_y step_x step_y profile\n",game);
+             }
+             if (irDiagnosticFile && !(irDiagnosticFrame++ % 10)) {
+                 filestream_printf(irDiagnosticFile,"%u %d %d %d %d %d %d %d %d %d\n",irDiagnosticFrame,rx,ry,tx,ty,cx,cy,irMouseDelta[p][0],irMouseDelta[p][1],mode);
+@@ -3779,3 +3779,29 @@
+ 			RefreshControllers();
+ 	}
+ }
++
++// Neo Pong's original paddle limits correspond to Y=20..206.
++bool BurnIRPaddleTarget(INT32 port, INT32 *target)
++{
++    if (port<0 || port>=MAX_PLAYERS || nDeviceType[port]!=RETRO_IR_MOUSE) return false;
++    int raw=input_cb_wrapper(port,RETRO_DEVICE_ANALOG,RETRO_DEVICE_INDEX_ANALOG_LEFT,RETRO_DEVICE_ID_ANALOG_Y);
++    *target=20+((raw+32768)*187)/65536;
++    return true;
++}
++
++void BurnIRPaddleReport(INT32 port, INT32 target, INT32 actual)
++{
++    retro_variable v={"fbneo-ir-mouse-diagnostics",NULL};
++    bool diagnostics=environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE,&v)&&v.value&&!strcmp(v.value,"enabled");
++    if(!diagnostics) { if(irDiagnosticFile){filestream_close(irDiagnosticFile);irDiagnosticFile=NULL;} return; }
++    if(!irDiagnosticFile) {
++        char path[MAX_PATH];snprintf(path,sizeof(path),"%s%cfbneo-ir-mouse.log",g_save_dir,PATH_DEFAULT_SLASH_C());
++        irDiagnosticFile=filestream_open(path,RETRO_VFS_FILE_ACCESS_WRITE,RETRO_VFS_FILE_ACCESS_HINT_NONE);
++        if(irDiagnosticFile) filestream_printf(irDiagnosticFile,"FBNeo IR Mouse v5 game=neopong\n");
++    }
++    if(port==0 && nDeviceType[0]!=RETRO_IR_MOUSE) irDiagnosticFrame++;
++    if (irDiagnosticFile && irDiagnosticFrame%10==1) {
++        filestream_printf(irDiagnosticFile,"PADDLE frame=%d player=%d target_y=%d actual_y=%d\n",irDiagnosticFrame,port+1,target,actual);
++        filestream_flush(irDiagnosticFile);
++    }
++}
+--- a/src/burn/burn_gun.h
++++ b/src/burn/burn_gun.h
+@@ -101,3 +101,11 @@
+ void BurnIRMouseFeedbackStep(INT32 cx, INT32 cy, INT32 scale, INT32 sx, INT32 sy, INT32 *dx, INT32 *dy);
+ void BurnTrackballIRFrame(INT32 dev, INT32 dx, INT32 dy, INT32 max_scanlines = 0);
+ #endif
++
++#ifdef __LIBRETRO__
++bool BurnIRPaddleTarget(INT32 port, INT32 *target);
++#endif
++
++#ifdef __LIBRETRO__
++void BurnIRPaddleReport(INT32 port, INT32 target, INT32 actual);
++#endif
+--- a/src/burn/drv/neogeo/neo_run.cpp
++++ b/src/burn/drv/neogeo/neo_run.cpp
+@@ -70,6 +70,7 @@
+  */
+ 
+ #include "neogeo.h"
++#include "burn_gun.h"
+ #include "cd_interface.h"
+ #include "burn_ym2610.h"
+ #include "bitswap.h"
+@@ -4621,8 +4622,53 @@
+ 
+ static INT32 in_cd_ffwd = 0;
+ 
++#ifdef __LIBRETRO__
++// Version-specific RAM-only program patch for Neo Pong v1.1. The ZIP is never
++// written. Only manual player branches are redirected; AI, ball and collision
++// code remain native. Each player independently returns to the original code
++// when its frontend device changes away from IR Mouse.
++static UINT16 irPongWord(UINT32 a) { return Neo68KROMActive[a]|(Neo68KROMActive[a+1]<<8); }
++static void irPongWrite(UINT32 a,UINT16 w) { Neo68KROMActive[a]=w&255;Neo68KROMActive[a+1]=w>>8; }
++static void irPongPatch()
++{
++    if (strcmp(BurnDrvGetTextA(DRV_NAME),"neopong") || !Neo68KROMActive) return;
++    const UINT32 branch[2]={0x3140,0x3386}, stub[2]={0x1e000,0x1e040};
++    const UINT32 next[2]={0x3230,0x3482};
++    // Validate both native movement write sites before touching the program.
++    if (irPongWord(0x319e)!=0x33c1 || irPongWord(0x33e4)!=0x33c1) return;
++    for (int p=0;p<2;p++) {
++        UINT32 a=branch[p],t=stub[p];
++        bool original=irPongWord(a)==0x0800 && irPongWord(a+2)==0 && irPongWord(a+4)==0x6700;
++        bool patched=irPongWord(a)==0x4ef9 && irPongWord(a+2)==(t>>16) && irPongWord(a+4)==(t&65535);
++        if (!original && !patched) continue;
++        INT32 y=0;
++        if (!BurnIRPaddleTarget(p,&y)) {
++            if(patched) { irPongWrite(a,0x0800);irPongWrite(a+2,0);irPongWrite(a+4,0x6700); }
++            if(NeoGraphicsRAM) BurnIRPaddleReport(p,-1,(512-(*((UINT16*)(NeoGraphicsRAM+(0x82f0+p*0x10)*2))>>7))&511);
++            continue;
++        }
++        int actual=NeoGraphicsRAM ? (512-(*((UINT16*)(NeoGraphicsRAM+(0x82f0+p*0x10)*2))>>7))&511 : y;
++        // The movement branch is patched, but the native ball deflection code
++        // still reads controller directions. Feed the real direction of travel.
++        UINT8 *joy=p?NeoJoy2:NeoJoy1;
++        joy[0]=y<actual; joy[1]=y>actual;
++        UINT16 words[]={0x13fc,0x0000,0x0010,(UINT16)(0x007b+p),
++            0x3e3c,(UINT16)(0x82f0+p*0x10),0x33c7,0x003c,0x0000,
++            0x323c,(UINT16)(((512-y)<<7)|2),0x33c1,0x003c,0x0002,
++            0x4ef9,(UINT16)(next[p]>>16),(UINT16)next[p]};
++        words[1]=y<actual?2:y>actual?1:(patched?irPongWord(t+2):0);
++        for(unsigned k=0;k<sizeof(words)/sizeof(words[0]);k++) irPongWrite(t+k*2,words[k]);
++        irPongWrite(a,0x4ef9);irPongWrite(a+2,t>>16);irPongWrite(a+4,t&65535);
++        if (NeoGraphicsRAM) BurnIRPaddleReport(p,y,(512-(*((UINT16*)(NeoGraphicsRAM+(0x82f0+p*0x10)*2))>>7))&511);
++    }
++}
++#endif
++
+ INT32 NeoFrame()
+ {
++#ifdef __LIBRETRO__
++    irPongPatch();
++#endif
+ 	//bprintf(0, _T("%X,"), SekReadWord(0x108)); // show game-id
+ 
+ 	if (NeoReset) {							   						// Reset machine

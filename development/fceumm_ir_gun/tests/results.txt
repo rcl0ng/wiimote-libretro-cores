@@ -1,0 +1,1 @@
+PASS both polling modes, endpoints/cropped viewport, 1000 held frames, trigger/away/release, Start/Select/gamepad, frontend assignment order, native restoration.
