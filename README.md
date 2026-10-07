@@ -1,6 +1,17 @@
 # Wiimote / vJoy custom libretro cores — v1.0.0
 
-Windows x64 community builds maintained/tested by Ron (rclong), with AI-assisted development. Eight separate custom cores provide left-stick gun inputs, selected SNES mouse profiles, arcade pointing and game-specific ship/paddle patches. Use the Lichtknarre → vJoy pipeline documented in `docs/INPUT-SETUP.md`; the exact matching RetroArch autoconfig is included. Chihiro and its converter are distributed as a separate project.
+Windows x64 community builds with maintainer testing and AI-assisted development. Eight separate custom cores provide left-stick gun inputs, selected SNES mouse profiles, arcade pointing and game-specific ship/paddle patches. Use the Lichtknarre → vJoy pipeline documented in `docs/INPUT-SETUP.md`; the exact matching RetroArch autoconfig is included. Chihiro and its converter are distributed as a separate project.
+
+## Downloads
+
+- **[Windows x64 package](https://github.com/rcl0ng/wiimote-libretro-cores/releases/download/v1.0.0/Wiimote_Libretro_v1.0.0_Windows_x64.zip)** — installable cores, info files, vJoy autoconfig, guides and component license notices.
+- **[Full modified source](https://github.com/rcl0ng/wiimote-libretro-cores/releases/download/v1.0.0/Wiimote_Libretro_v1.0.0_Source.zip)** — extracted source trees for all eight cores, patches, licenses and build/test material.
+- **[SHA256 checksums](https://github.com/rcl0ng/wiimote-libretro-cores/releases/download/v1.0.0/Wiimote_Libretro_v1.0.0_SHA256SUMS.txt)** — verify the Windows and source packages.
+- [Release page](https://github.com/rcl0ng/wiimote-libretro-cores/releases/tag/v1.0.0)
+
+GitHub's automatic **Source code (zip/tar.gz)** downloads contain the repository tree, currently documentation, configuration and patches. Use **Full modified source** above for the complete emulator code. The source is distributed separately from the Windows package. Download both for a complete software/source distribution. Both packages correspond to the same tested v1.0.0 core DLLs.
+
+For SNES mouse, select SNES Mouse in Quick Menu Controls and **Mouse Input = Left Analog (Position Tracking)** in Core Options. RetroBat remains optional.
 
 ## Install
 
@@ -8,7 +19,7 @@ Windows x64 community builds maintained/tested by Ron (rclong), with AI-assisted
 
 Close RetroArch. Copy `cores` contents into the configured Core directory and `info` contents into the configured Core Info directory. Back up existing custom files. Install the shared `autoconfig/dinput/vJoy Device.cfg`, configure Lichtknarre buttons to match, and **enable Disable Left Analog in Menu**. Read the per-core guide in `docs/cores` before selecting device types. For RetroBat follow `retrobat/INSTALL.md`; reference XML files are optional, version-specific examples, not an automatic installer.
 
-All DLL names are retained except `fbneo_galaga_ir`, now renamed to `fbneo_shooter`. Existing shooter users must select the new core and update per-game core assignments; old filename-based options/remaps may need migration. Keep backups. Its embedded development core name can still say Galaga IR because the binary was not rebuilt. Public version is 1.0.0 v1.0.0; internal DLL build strings retain the original tested revisions. All ROMs, BIOS and save data must be supplied by the user. Stock cores remain available. Exact supported sets/revisions and known limitations are in the per-core guides.
+All DLL names are retained except `fbneo_galaga_ir`, now renamed to `fbneo_shooter`. Existing shooter users must select the new core and update per-game core assignments; old filename-based options/remaps may need migration. Keep backups. Its embedded development core name can still say Galaga IR because the binary was not rebuilt. Public version is 1.0.0; internal DLL build strings retain the original tested revisions. All ROMs, BIOS and save data must be supplied by the user. Stock cores remain available. Exact supported sets/revisions and known limitations are in the per-core guides.
 
 ## Core guides
 
@@ -23,8 +34,5 @@ All DLL names are retained except `fbneo_galaga_ir`, now renamed to `fbneo_shoot
 
 ## Source, licenses and validation
 
-`development/<core>` preserves full modified source archives, upstream notices, patches and historical tests/build instructions. Those historical documents retain old version labels; current docs take precedence for installation and compatibility status. This bundle has mixed upstream licenses, including non-commercial restrictions: retain each component's license and do not apply one blanket license. It is a free community release, not an official Libretro/RetroBat product. See `docs/RELEASE-VERIFICATION.md` for verification scope.
+The full source release asset has extracted trees under `source/<core>`, with patches, upstream notices and historical tests/build instructions under `development/<core>`. The Windows asset contains the DLLs, configuration/docs and license notices; source is a separate download. This repository retains the documentation and patch subset; download the full source asset for all emulator files. Those historical documents retain old version labels; current docs take precedence for installation and compatibility status. This bundle has mixed upstream licenses, including non-commercial restrictions: retain each component's license and do not apply one blanket license. It is a free community release, not an official Libretro/RetroBat product. See `docs/RELEASE-VERIFICATION.md` for verification scope.
 
-## Downloads and setup
-
-Get the complete Windows package, including modified source and licenses, from [Releases](../../releases/latest). For SNES mouse, select SNES Mouse in Quick Menu Controls and **Mouse Input = Left Analog (Position Tracking)** in Core Options. Chihiro users: **Vulkan is the recommended backend**. RetroBat remains optional.
