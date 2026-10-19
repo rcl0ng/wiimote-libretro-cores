@@ -1,7 +1,5 @@
-# Full modified source
+# Source code and development resources — v1.2.0
 
-Download [Wiimote_Libretro_v1.0.0_Source.zip](https://github.com/rcl0ng/wiimote-libretro-cores/releases/download/v1.0.0/Wiimote_Libretro_v1.0.0_Source.zip) for the complete modified source of all eight cores, component licenses, patches and build/test material. Source trees are already extracted under source/<core_id>/. The install-only Windows package is a separate asset.
+Download [Wiimote_Libretro_v1.2.0_Source.zip](https://github.com/rcl0ng/wiimote-libretro-cores/releases/download/v1.2.0/Wiimote_Libretro_v1.2.0_Source.zip) for the source/development archive accompanying the released binaries. This repository carries selected patches, release-source-status notes and build documentation in `development/`; it does not replicate every bundled historical source tree.
 
-[Windows package](https://github.com/rcl0ng/wiimote-libretro-cores/releases/download/v1.0.0/Wiimote_Libretro_v1.0.0_Windows_x64.zip) · [Checksums](https://github.com/rcl0ng/wiimote-libretro-cores/releases/download/v1.0.0/Wiimote_Libretro_v1.0.0_SHA256SUMS.txt)
-
-GitHub's automatic Source code ZIP/tar.gz contains the smaller repository tree. Use the full source asset above for all emulator code. Both assets must remain available together. Upstream/component terms and noncommercial restrictions remain applicable; no blanket license replaces them.
+The release Source ZIP is **not** guaranteed to contain complete modified sources for each of the 11 binaries; consult `SOURCE-LICENSE-INDEX.md` and the per-component status documents before attempting reproducible builds or redistribution. Respect upstream licenses.

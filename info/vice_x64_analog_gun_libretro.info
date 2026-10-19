@@ -1,0 +1,6 @@
+display_name = "C64 (VICE Hybrid Gun)"
+corename = "C64 (VICE Hybrid Gun)"
+supported_extensions = "d64|d71|d80|d81|d82|g64|g41|x64|t64|tap|prg|p00|crt|bin|zip|7z|gz|d6z|d7z|d8z|g6z|g4z|x6z|cmd|m3u|vfl|vsf|nib|nbz|d2m|d4m|tcrt"
+supports_no_game = "false"
+manufacturer = "Community"
+license = "GPLv2+"

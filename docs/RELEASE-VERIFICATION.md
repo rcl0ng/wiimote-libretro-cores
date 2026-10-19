@@ -1,11 +1,11 @@
-# v1.0.0 verification — 2026-10-07
+# Release verification — v1.2.0
 
-Ron reported testing all cores successfully before this packaging pass. The nine DLLs are byte-for-byte identical to the accepted RC2 binaries. Historical test logs are retained with their original labels; they are not new Windows test runs.
+**Packaging:** The release ZIPs were assembled from provided binaries and sources and archive/manifest-checked. This does not constitute a fresh compilation or an emulator/gameplay certification.
 
-Packaging checks: ZIP integrity; readable source archives with safe relative member paths; core/info basename pairs; Windows AMD64 DLL headers; unique RetroBat system names; reference main config has 246 systems; recorded DLL and file SHA256 checksums. Full modified emulator source archives, patch history and component licenses are included. This is a mixed-license distribution: GPL components, Snes9x and FBNeo/Genesis noncommercial terms and other component licenses remain applicable. No blanket MIT license is applied to the emulator suite.
+**Core set (11):** Beetle PSX IR Gun, Beetle Saturn IR Gun, FBNeo IR Mouse, FBNeo Shooter IR (`fbneo_shooter` naming retained), FCEUmm IR Gun, Flycast Hybrid IR, Genesis Plus GX hybrid, PCSX2 GunCon2 hybrid, SNES9x Analog Mouse v10, SNES9x IR Gun, and VICE x64 Analog Gun.
 
-Build entry points and dependencies were inspected. The FBNeo mouse source archive already includes Makefile.mouse; the extra development copy is retained for reference. Chihiro source recovery previously passed git apply --check against its recorded base. Its Meson wrap sources and matching external library releases have now been included with download hashes and the pinned MXE recipes. Release sources can be rebuilt/modified, including replacement of static libraries; see development/BUILDING.md. No obfuscation, signing restriction or installer is imposed.
+**New reported capability:** SNES9x Analog Mouse v10 adds two-player Arkanoid: Doh It Again dual-paddle support; test on the target system before making universal compatibility claims.
 
-Scope: no clean Windows rebuild or binary-reproducibility comparison was run here. Toolchain image availability, exact environment reconstruction and all game/revision combinations are not certified. Do not describe these checks as a new gameplay test or universal compatibility guarantee. Public docs describe title-specific limitations. No commercial game ROMs, extracted commercial XBEs, Chihiro/Xbox BIOS or user saves are bundled.
+**Out of scope:** Zeus, xemu, 3DO and Chihiro (separate project). Preserve old v1.0.0 validation records under historical sources where available; they do not verify newer DLLs.
 
-An installer and automatic RetroBat configuration replacement are deferred. Retained upstream firmware/test source files in emulator checkouts follow their upstream licenses; “no BIOS bundled” in user setup means no required commercial Chihiro/Xbox firmware.
+RetroBat reference XML files are examples copied from specific environments, **not safe drop-in replacements**. Verify XML structure, system-specific overrides, and core names before merging with active configuration files.

@@ -19,8 +19,11 @@ The reference configurations derive from Ron's tested installation, not a univer
 | psx | es_systems_psx.cfg | `<core>beetle_psx_ir_gun</core>` |
 | saturn | es_systems_saturn.cfg | `<core>beetle_saturn_ir_gun</core>` |
 | fbneo / mame | Their active system file or es_systems_main.cfg | `<core>fbneo_mouse</core>` and `<core>fbneo_shooter</core>` |
-| chihiro (separate project) | es_systems_chihiro.cfg | `<core>chihiro</core>` |
 
-Chihiro also needs `.bin` in its system's `<extension>` list. Keep BIOS in RetroArch's configured System/BIOS directory, not a path guessed from the install drive. Use Settings → Directory to confirm.
+| naomi / dreamcast (where appropriate) | Active system override or main file | `<core>flycast_hybrid_ir</core>` |
+| ps2 (if Libretro supported in current RetroBat system entry) | Active PS2 system file | `<core>pcee2_analog_gun</core>` |
+| c64 (if Libretro supported in current RetroBat system entry) | Active C64 system file | `<core>vice_x64_analog_gun</core>` |
+
+**New entries are suggestions only.** Verify that your RetroBat version supports Libretro as an emulator for each system; add a `<cores>` entry only to an existing or deliberately configured `<emulator name="libretro">` element. These additions do not automatically integrate BIOS paths, game launchers, or per-game options. Do not use the supplied Flycast example's machine-specific ROM path on another installation.
 
 References: https://wiki.retrobat.org/advanced-features/batgui and https://wiki.retrobat.org/get-started/retrobat-folder-structure . Detailed per-system active-file behavior is also based on Ron's working configuration and report; exact BatGui controls must be checked on the user's version.

@@ -1,11 +1,48 @@
-# v1.0.0 — Windows x64
+# Wiimote Libretro Custom Cores v1.2.0
 
-First public packaging of these tested custom cores. Eight Wiimote/vJoy cores: NES, SNES gun, selected SNES mouse profiles, Genesis/Sega CD/Master System, PSX, Saturn, FBNeo mouse and FBNeo shooters.
+**Windows x64 · Wiimote + Lichtknarre/vJoy · RetroArch / RetroBat**
 
-Standalone RetroArch is the primary setup; RetroBat integration is optional. The package includes component licenses, info files, vJoy autoconfig and a consolidated RetroBat reference main config. No commercial games or Chihiro/Xbox BIOS are included.
+This release consolidates **11 custom Libretro cores** into two binary package layouts and a separate source/development archive. It expands the original v1.0.0 lineup with newer SNES features and additional console/controller experiments while keeping existing FBNeo Shooter filenames compatible.
 
-Wiimote input requires Lichtknarre/vJoy, the supplied button mapping and dinput setup. Enable Disable Left Analog in Menu. Missile Command fires its three silos with D-pad Left/Down/Right. For SNES mouse, set Mouse Input to Left Analog (Position Tracking) in Core Options as well as choosing the SNES Mouse device. Chihiro: Vulkan is strongly recommended; use a fresh process for each game. See the per-core guides for exact titles/revisions and limits, including SNES T2 multiplayer and unsupported mouse profiles.
+## Release highlight: two-player SNES Arkanoid 2
 
-All cores passed maintainer testing on 2026-10-07. DLLs are unchanged from the accepted RC2. Packaging/source checks passed; no fresh Windows rebuild or universal compatibility certification is claimed. Historical embedded version names remain. fbneo_galaga_ir is distributed as fbneo_shooter. Mixed upstream licenses remain applicable; noncommercial components are not relicensed.
+**SNES9x Analog Mouse v10** introduces **two-player dual-paddle support for *Arkanoid: Doh It Again* (Arkanoid 2)**, enabling separate Wiimote/vJoy paddle inputs for two players in the supported setup. The v10 series builds on earlier analog-mouse work, including the v9 FPS hybrid developments.
 
-Full modified emulator source, patches and build/test material are provided in the separate **Wiimote_Libretro_v1.0.0_Source.zip** asset. Download the Windows ZIP for installation and the Source ZIP for code. GitHub's automatic Source code downloads contain the smaller repository tree. Packaging revision 2 changes archive contents/checksums only; core DLLs are unchanged.
+## Newly included / updated
+
+- **SNES9x Analog Mouse v10 Dual Paddle:** new two-player Arkanoid 2 support; supersedes the earlier SNES analog-mouse build.
+- **Flycast Hybrid IR v1 (RetroBat):** new hybrid pointer/input core and separately staged optional remaps, crosshair resources and NVRAM tools. Review extras before use.
+- **PCSX2 GunCon2 Hybrid v0.9:** new PS2 GunCon2-oriented Libretro core package.
+- **VICE x64 Analog Gun:** new Commodore 64 analog-pointer/lightgun development build.
+- **FBNeo IR Mouse v5 NeoPong:** updated arcade mouse/paddle/trackball build supplied for the collection.
+- **FBNeo Shooter IR v3 Final:** retained under the original `fbneo_shooter_libretro.dll` filename (and matching info file) so previous RetroBat entries continue to resolve.
+- Other packaged cores: Beetle PSX IR Gun v1, Beetle Saturn IR Gun v1, FCEUmm IR Gun v1, Genesis Plus GX IR Hybrid v3, and SNES9x IR Gun v2 MACS.
+
+## Downloads
+
+| Asset | Contents |
+|---|---|
+| `Custom_Cores_v1.2.0.zip` | 11 core DLLs and their `.info` files, grouped by core along with associated material. |
+| `Wiimote_Libretro_v1.2.0_Windows_x64.zip` | The same 11 DLLs and info files in installation-oriented `cores/` and `info/` folders, plus documentation, licenses and optional RetroBat/controller resources. |
+| `Wiimote_Libretro_v1.2.0_Source.zip` | Historical source material and available patches, supplementary build instructions and development notes. Some v1.2.0 components have partial sources, not full self-contained source trees. |
+
+**Install:** Back up your configuration first. Extract the Windows x64 package to a staging location; copy the needed `cores/*.dll` and matching `info/*.info` files into your active RetroArch installation. **Merge** RetroBat reference entries with your local config rather than overwriting existing `es_systems_*.cfg` files. Review Flycast's optional assets individually.
+
+## Backward compatibility
+
+The finalized release intentionally uses `fbneo_shooter_libretro.dll` / `fbneo_shooter_libretro.info` and the RetroBat identifier **`fbneo_shooter`**, matching **v1.0.0**. The alternative `fbneo_galaga_ir_libretro.dll` filename found in a prior staging build contained an **identical DLL binary**; installing both copies is unnecessary.
+
+## Excluded from v1.2.0
+
+- Midway Zeus — not sufficiently verified for this release.
+- xemu / Xbox — not sufficiently verified.
+- Opera / 3DO — not sufficiently verified.
+- Chihiro — maintained separately in its own repository.
+
+## Testing and known caveats
+
+These files were collated and archive/hash-checked, **not compiled or gameplay-tested during release preparation**. Compatibility depends on RetroArch/RetroBat versions, installed dependencies, Lichtknarre/vJoy configuration, control bindings and game-specific behavior. Especially test the new SNES dual-paddle mode, Flycast, PCSX2 and Commodore 64 locally before describing them as fully verified.
+
+No ROMs or commercial BIOS files are included. Preserve all bundled core licenses and attributions. GitHub's automatic Source code ZIP/TAR archives only snapshot the repository; use the separate **Source** release asset for the provided development materials.
+
+Thanks to the upstream emulator and Libretro teams, contributors, and everyone testing Wiimote-based lightgun and hybrid controller workflows. 💚

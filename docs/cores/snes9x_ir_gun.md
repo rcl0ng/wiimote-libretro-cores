@@ -8,4 +8,4 @@ B = trigger; A = offscreen aim/reload for Justifier; Plus = Start/Pause and game
 
 Lethal Enforcers and earlier Scope testing were reported successful. The MACS addition passed range/trigger tests in the development harness; full scoring is not certified. **T2: The Arcade Game multiplayer is not recommended**: axis sticking was reported in the later trial, which was abandoned in favor of the arcade version. This separate gun core does not include the dedicated SNES mouse core's game-specific tracking fixes.
 
-See `../INPUT-SETUP.md` for the required Lichtknarre/vJoy mapping. Historical sources and detailed build/test materials are under `development/snes9x_ir_gun/`.
+See `../INPUT-SETUP.md` for the required Lichtknarre/vJoy mapping. Historical sources and detailed build/test materials are in the source ZIP under `development/snes9x_ir_gun/`.

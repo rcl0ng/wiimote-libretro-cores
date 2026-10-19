@@ -15,4 +15,4 @@ Core Options → Cheats provides Extra Ships, Infinite Lives and Invincibility; 
 
 Galaga and the later shooter work were reported successful; the final Gaplus formation-range and numeric-count revision passed developer tests but its final Windows retest was not explicitly recorded. Include it in RC verification. **Space Invaders is excluded from recommendations** due trail/collision behavior, although its earlier driver code remains. Other clones/revisions do not receive a validated custom mapping. Original ROM files are unchanged.
 
-See `../INPUT-SETUP.md` for the required Lichtknarre/vJoy mapping. Historical sources and detailed build/test materials are under `development/fbneo_shooter/`.
+See `../INPUT-SETUP.md` for the required Lichtknarre/vJoy mapping. Historical sources and detailed build/test materials are in the source ZIP under `development/fbneo_shooter/`.

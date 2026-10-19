@@ -1,0 +1,26 @@
+PASS: Mario Paint rejected-overshoot regression, actual cursor recovery, stationary target, game recentering, exclusive bounds, clutch, ROM/port guards
+PASS: diagnostic values, Select detection, logging disabled; real SNES mouse packets, first sample, 127-unit limit, bounded backlog, stationary aim, independent ports, clutch, clicks, native mouse
+PASS: automatic game profiles, Arkanoid stationary edge recovery and width changes, dynamic Lemmings bounds, cursor clamps, optional clutch, exact-ROM and state guards
+PASS: FPS motion-only packets, stationary off-center aim, reversal, no backlog, digital walking/running/strafe, Doom command bridge, minus reserved, Wolf mouse on port 2 from frontend port 1
+
+port 1 target 128 actual 112 other 111 width 32
+port 1 target 255 actual 143 other 111 width 32
+port 1 target 0 actual 16 other 111 width 32
+port 1 target 128 actual 112 other 111 width 32
+port 1 target 255 actual 143 other 111 width 32
+port 2 target 128 actual 112 other 143 width 32
+port 2 target 255 actual 143 other 143 width 32
+port 2 target 0 actual 16 other 143 width 32
+port 2 target 128 actual 112 other 143 width 32
+port 2 target 255 actual 143 other 143 width 32
+Map_LoROMMap
+
+menu aim 128 88 actual (128, 88) expected (128, 88)
+menu aim 0 0 actual (72, 32) expected (72, 32)
+menu aim 255 223 actual (174, 142) expected (174, 142)
+menu aim 128 88 actual (128, 88) expected (128, 88)
+PASS: supplied Mario Paint pause state, full menu range and stationary aim
+Map_LoROMMap
+
+Windows artifact: PE32+ x86-64 DLL; libretro entry points verified.
+Imports: KERNEL32.dll, msvcrt.dll. Version: 1.63 AM v10.

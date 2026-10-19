@@ -1,0 +1,6 @@
+Added flycast_hybrid_ir immediately after each existing libretro flycast core.
+Main file: atomiswave, naomi, naomi2, dreamcast.
+Naomi override: naomi. Original defaults, paths and commands preserved.
+Install each file in its existing location after backing up. Keep the actual
+installed main filename (the upload suffix (3) is not part of the name).
+Restart EmulationStation and choose libretro / flycast_hybrid_ir per game.

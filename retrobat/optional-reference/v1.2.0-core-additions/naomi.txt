@@ -1,0 +1,4 @@
+# RetroBat optional snippet: naomi
+# Add to the <cores> list beneath an existing <emulator name="libretro"> for system <name>naomi</name>, only when your RetroBat build supports this Libretro route.
+<core>flycast_hybrid_ir</core>
+# Avoid replacing your active es_systems_*.cfg wholesale.

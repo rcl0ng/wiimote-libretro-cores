@@ -6,4 +6,4 @@ Select **Wiimote IR Gun** on each required frontend port. Each controls the corr
 
 B = trigger; A = offscreen reload sequence; Plus = gun Start. Minus/Home have no synthetic gun actions. Native reload sequence timing is not aiming smoothing. No generic hybrid pad routing is included. Saturn testing was reported successful by Ron, but no complete game/region matrix was recorded. Standard Beetle Saturn BIOS and software-renderer requirements apply.
 
-See `../INPUT-SETUP.md` for the required Lichtknarre/vJoy mapping. Historical sources and detailed build/test materials are under `development/beetle_saturn_ir_gun/`.
+See `../INPUT-SETUP.md` for the required Lichtknarre/vJoy mapping. Historical sources and detailed build/test materials are in the source ZIP under `development/beetle_saturn_ir_gun/`.

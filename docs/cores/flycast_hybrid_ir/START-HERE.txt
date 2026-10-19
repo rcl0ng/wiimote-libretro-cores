@@ -1,0 +1,16 @@
+1. Close RetroBat/RetroArch.
+2. Copy flycast_hybrid_ir_libretro.dll and matching .info into the cores/info
+   folders of the RetroArch installation used by RetroBat.
+3. Back up the current RetroBat config files; install the edited files in
+   retrobat-configs at their existing locations. Keep the main installed name.
+4. Restart EmulationStation. Select libretro / flycast_hybrid_ir per gun game.
+5. Controls: Hybrid Lightgun (Left Stick) for both ports; save game remap.
+6. Different vJoy device per player, deadzone 0, sensitivity 1,
+   Analog-to-Digital None. Retropad B = Trigger, A = Auto Reload.
+7. Import NVRAM into reicast beneath the ACTIVE save directory supplied by
+   RetroBat. Selecting a differently named core can change that save location.
+   Close all emulators before copying. See README.txt for details.
+
+If you used the earlier package that replaced standard Flycast, restore your
+stock Flycast DLL/info from backup. This package installs a separate core.
+The core code is unchanged from v1; Windows gameplay needs your test.

@@ -1,0 +1,4 @@
+# RetroBat optional snippet: c64
+# Add to the <cores> list beneath an existing <emulator name="libretro"> for system <name>c64</name>, only when your RetroBat build supports this Libretro route.
+<core>vice_x64_analog_gun</core>
+# Avoid replacing your active es_systems_*.cfg wholesale.

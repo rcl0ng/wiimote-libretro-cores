@@ -1,42 +1,9 @@
-# Source and license index
+# Source and component license index — v1.2.0
 
-Public release candidate v1.0.0. Upstream licenses are preserved verbatim. Source archives contain modified emulator code and their upstream notices; patches provide review history. No blanket project license supersedes component terms. A successful packaging/source-presence check does not certify all build dependencies.
+The release contains 11 Windows x64 custom Libretro core builds. Download the development archive from the [v1.2.0 release](https://github.com/rcl0ng/wiimote-libretro-cores/releases/tag/v1.2.0): `Wiimote_Libretro_v1.2.0_Source.zip`. The Windows binaries are distributed in a separate package.
 
-## Source / patches
+**Important:** Source availability varies. Historical source trees exist for older cores, whereas some new additions include only patches, source-status notes, or partial source material. Do not assume every distributed DLL is independently reproducible from the archive without additional upstream sources and build dependencies. Consult `development/<core>/RELEASE-SOURCE-STATUS.md` where supplied.
 
-- `development/fceumm_ir_gun/ir-gun.patch`
-- `development/fceumm_ir_gun/source.tar.gz`
-- `development/fceumm_ir_gun/upstream-commit.txt`
-- `development/snes9x_ir_gun/Source.tar.gz`
-- `development/snes9x_ir_gun/upstream-commit.txt`
-- `development/snes9x_ir_gun/v1-to-v2.patch`
-- `development/snes9x_analog_mouse/Snes9x_Analog_Mouse_Source.tar.gz`
-- `development/snes9x_analog_mouse/upstream-to-v7.patch`
-- `development/snes9x_analog_mouse/v7-to-v8.patch`
-- `development/snes9x_analog_mouse/v8-to-v9.patch`
-- `development/genesis_plus_gx_analog/source.tar.gz`
-- `development/genesis_plus_gx_analog/v2-to-v3.patch`
-- `development/beetle_psx_ir_gun/ir-gun.patch`
-- `development/beetle_psx_ir_gun/source.tar.gz`
-- `development/beetle_psx_ir_gun/upstream-commit.txt`
-- `development/beetle_saturn_ir_gun/ir-gun.patch`
-- `development/beetle_saturn_ir_gun/source.tar.gz`
-- `development/beetle_saturn_ir_gun/upstream-commit.txt`
-- `development/fbneo_mouse/Source.tar.gz`
-- `development/fbneo_mouse/v4-to-v5.patch`
-- `development/fbneo_shooter/source/source.tar.gz`
-- `development/fbneo_shooter/source/upstream-to-v2.patch`
-- `development/fbneo_shooter/source/v2-to-v3.patch`
+License text is preserved by component under `licenses/` and in the Source asset. These are mixed upstream licenses, including conditions restricting commercial use. There is **no single blanket license** for all cores. Preserve notices and comply with individual terms.
 
-## Prominent license copies
-
-- `licenses/fceumm_ir_gun/LICENSE.txt`
-- `licenses/snes9x_ir_gun/LICENSE-Snes9x.txt`
-- `licenses/snes9x_analog_mouse/LICENSE-Snes9x.txt`
-- `licenses/genesis_plus_gx_analog/LICENSE.txt`
-- `licenses/beetle_psx_ir_gun/LICENSE.txt`
-- `licenses/beetle_saturn_ir_gun/LICENSE.txt`
-- `licenses/fbneo_mouse/LICENSE.txt`
-- `licenses/fbneo_shooter/LICENSE.txt`
-
-Converter source/license/dependency notices remain together under `converter/ChihiroPack` where present. See docs/RELEASE-VERIFICATION.md and development/BUILDING.md.
+GitHub's automatic Source code ZIP/tar.gz is merely a snapshot of this repository, not the separate v1.2.0 Source release asset.

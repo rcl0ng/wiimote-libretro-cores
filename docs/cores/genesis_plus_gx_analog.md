@@ -8,4 +8,4 @@ Master System: use **Wiimote IR Light Phaser** on the required port, with a seco
 
 Menacer 6-in-1, Lethal Enforcers MD/CD and Master System gun play were reported successful, including independent two-player Justifier testing. **Body Count gun detection remains unresolved.** Gamepad-only and unsupported titles do not acquire gun support merely by selecting the device.
 
-See `../INPUT-SETUP.md` for the required Lichtknarre/vJoy mapping. Historical sources and detailed build/test materials are under `development/genesis_plus_gx_analog/`.
+See `../INPUT-SETUP.md` for the required Lichtknarre/vJoy mapping. Historical sources and detailed build/test materials are in the source ZIP under `development/genesis_plus_gx_analog/`.

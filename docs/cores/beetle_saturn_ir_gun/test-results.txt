@@ -1,0 +1,1 @@
+PASS: device advertisement, pre-load deferral/load restoration, both polling paths, two-player independence/1000 held frames, NTSC/PAL endpoints, trigger/reload/Start, Minus, pointer-option independence, native restoration, unload/deinit lifecycle.

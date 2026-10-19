@@ -10,4 +10,4 @@ NeoPong uses **homebrew v1.1**, program CRC **9f35e29d**, and matching Neo Geo B
 
 **IR Mouse Diagnostics defaults to enabled in the retained binary.** Disable it under Core Options → Input for routine play; the log `fbneo-ir-mouse.log` is written in the save directory and replaced by a subsequent launch. The original diagnostics/test scripts are in the source materials.
 
-See `../INPUT-SETUP.md` for the required Lichtknarre/vJoy mapping. Historical sources and detailed build/test materials are under `development/fbneo_mouse/`.
+See `../INPUT-SETUP.md` for the required Lichtknarre/vJoy mapping. Historical sources and detailed build/test materials are in the source ZIP under `development/fbneo_mouse/`.
