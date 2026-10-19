@@ -1,38 +1,58 @@
-# Wiimote / vJoy custom libretro cores — v1.0.0
-
-Windows x64 community builds with maintainer testing and AI-assisted development. Eight separate custom cores provide left-stick gun inputs, selected SNES mouse profiles, arcade pointing and game-specific ship/paddle patches. Use the Lichtknarre → vJoy pipeline documented in `docs/INPUT-SETUP.md`; the exact matching RetroArch autoconfig is included. Chihiro and its converter are distributed as a separate project.
-
-## Downloads
-
-- **[Windows x64 package](https://github.com/rcl0ng/wiimote-libretro-cores/releases/download/v1.0.0/Wiimote_Libretro_v1.0.0_Windows_x64.zip)** — installable cores, info files, vJoy autoconfig, guides and component license notices.
-- **[Full modified source](https://github.com/rcl0ng/wiimote-libretro-cores/releases/download/v1.0.0/Wiimote_Libretro_v1.0.0_Source.zip)** — extracted source trees for all eight cores, patches, licenses and build/test material.
-- **[SHA256 checksums](https://github.com/rcl0ng/wiimote-libretro-cores/releases/download/v1.0.0/Wiimote_Libretro_v1.0.0_SHA256SUMS.txt)** — verify the Windows and source packages.
-- [Release page](https://github.com/rcl0ng/wiimote-libretro-cores/releases/tag/v1.0.0)
-
-GitHub's automatic **Source code (zip/tar.gz)** downloads contain the repository tree, currently documentation, configuration and patches. Use **Full modified source** above for the complete emulator code. The source is distributed separately from the Windows package. Download both for a complete software/source distribution. Both packages correspond to the same tested v1.0.0 core DLLs.
-
-For SNES mouse, select SNES Mouse in Quick Menu Controls and **Mouse Input = Left Analog (Position Tracking)** in Core Options. RetroBat remains optional.
-
-## Install
-
-**Start with [INSTALL-RETROARCH.md](INSTALL-RETROARCH.md). Standalone RetroArch is the primary setup; RetroBat integration is entirely optional.**
-
-Close RetroArch. Copy `cores` contents into the configured Core directory and `info` contents into the configured Core Info directory. Back up existing custom files. Install the shared `autoconfig/dinput/vJoy Device.cfg`, configure Lichtknarre buttons to match, and **enable Disable Left Analog in Menu**. Read the per-core guide in `docs/cores` before selecting device types. For RetroBat follow `retrobat/INSTALL.md`; reference XML files are optional, version-specific examples, not an automatic installer.
-
-All DLL names are retained except `fbneo_galaga_ir`, now renamed to `fbneo_shooter`. Existing shooter users must select the new core and update per-game core assignments; old filename-based options/remaps may need migration. Keep backups. Its embedded development core name can still say Galaga IR because the binary was not rebuilt. Public version is 1.0.0; internal DLL build strings retain the original tested revisions. All ROMs, BIOS and save data must be supplied by the user. Stock cores remain available. Exact supported sets/revisions and known limitations are in the per-core guides.
-
-## Core guides
-
-- [Nintendo - NES / Famicom (FCEUmm IR Gun)](docs/cores/fceumm_ir_gun.md)
-- [Nintendo - SNES / SFC (Snes9x IR Gun)](docs/cores/snes9x_ir_gun.md)
-- [Nintendo - SNES / SFC (Snes9x Analog Mouse)](docs/cores/snes9x_analog_mouse.md)
-- [Sega - MS/GG/MD/CD (Genesis Plus GX IR Gun)](docs/cores/genesis_plus_gx_analog.md)
-- [Sony - PlayStation (Beetle PSX IR Gun)](docs/cores/beetle_psx_ir_gun.md)
-- [Sega - Saturn (Beetle Saturn IR Gun)](docs/cores/beetle_saturn_ir_gun.md)
-- [Arcade - FBNeo (IR Mouse)](docs/cores/fbneo_mouse.md)
-- [Arcade - FBNeo (IR Shooters)](docs/cores/fbneo_shooter.md)
-
-## Source, licenses and validation
-
-Inside the full source ZIP, each core’s code is in source/(core)/. Its patches and build/test records are in development/(core)/. The Windows asset contains the DLLs, configuration/docs and license notices; source is a separate download. This repository retains the documentation and patch subset; download the full source asset for all emulator files. Those historical documents retain old version labels; current docs take precedence for installation and compatibility status. This bundle has mixed upstream licenses, including non-commercial restrictions: retain each component's license and do not apply one blanket license. It is a free community release, not an official Libretro/RetroBat product. See `docs/RELEASE-VERIFICATION.md` for verification scope.
-
+Wiimote / vJoy Custom Libretro Cores
+Release v1.2.0 — Windows x64
+Custom Libretro cores and configuration resources for Wiimote lightgun, analog-pointer, mouse, paddle, and hybrid controller setups using Lichtknarre + vJoy, RetroArch, and RetroBat.
+Download the latest GitHub release · All releases
+What's new in v1.2.0
+SNES9x Analog Mouse v10 adds two-player paddle support for Arkanoid: Doh It Again (Arkanoid 2), building on the prior FPS-hybrid work.
+Adds the Flycast Hybrid IR v1 RetroBat package for Dreamcast/Naomi workflows.
+Adds the PCSX2 GunCon2 Hybrid v0.9 core for PS2 gun-controller experimentation.
+Adds the VICE x64 Analog Gun core for Commodore 64 pointer/lightgun experiments.
+Consolidates updated custom cores, optional controller resources, and RetroBat reference configurations into one v1.2.0 distribution.
+Backward compatibility: the FBNeo Shooter DLL retains its v1.0.0 name, `fbneo_shooter_libretro.dll`. Existing RetroBat references using `fbneo_shooter` do not need changing.
+For changes, limitations, and upgrade guidance, see v1.2.0 release notes.
+Download packages
+Release asset	Purpose
+`Custom_Cores_v1.2.0.zip`	Same 11 core DLLs and associated `.info` files, organized in individual core folders.
+`Wiimote_Libretro_v1.2.0_Windows_x64.zip`	Unified RetroArch-style `cores/` and `info/` directories, documentation and optional configuration resources.
+`Wiimote_Libretro_v1.2.0_Source.zip`	Development/source materials, patches, historical upstream trees and build references. Some newer cores have partial source/patch sets, not fully reproducible standalone source trees.
+GitHub's automatically generated Source code archives are repository snapshots and are not substitutes for the separately uploaded Source ZIP.
+Included cores
+Core DLL	System / use	Packaged build
+`beetle_psx_ir_gun_libretro.dll`	PlayStation pointer / lightgun hybrid	IR Gun v1
+`beetle_saturn_ir_gun_libretro.dll`	Sega Saturn pointer / lightgun hybrid	IR Gun v1
+`fceumm_ir_gun_libretro.dll`	NES Wiimote lightgun	IR Gun v1
+`genesis_plus_gx_analog_libretro.dll`	Master System / Genesis pointer hybrid	IR Hybrid v3
+`snes9x_ir_gun_libretro.dll`	SNES lightgun	IR Gun v2 MACS
+`snes9x_analog_mouse_libretro.dll`	SNES mouse, paddle and selected hybrid control modes	Analog Mouse v10 Dual Paddle
+`fbneo_mouse_libretro.dll`	Arcade mouse / paddle / trackball	IR Mouse v5 NeoPong
+`fbneo_shooter_libretro.dll`	FBNeo Galaga-family IR shooter controls	Shooter IR v3 Final (original compatible filename)
+`flycast_hybrid_ir_libretro.dll`	Dreamcast / Naomi hybrid IR	v1 RetroBat
+`pcee2_analog_gun_libretro.dll`	PS2 GunCon2 hybrid	v0.9
+`vice_x64_analog_gun_libretro.dll`	Commodore 64 analog gun	Supplied C64 build
+The packages contain 11 core DLLs. Individual game compatibility and player count vary; consult core-specific notes and test on your own configuration. Inclusion is not a guarantee of gameplay verification.
+Not included: Midway Zeus, xemu, Opera/3DO, or Chihiro. These remain outside this release; Chihiro has its own repository.
+Requirements
+64-bit Windows and a compatible RetroArch / RetroBat setup.
+Wiimotes connected through the user's preferred Bluetooth arrangement.
+Lichtknarre and configured vJoy virtual devices; any necessary HIDHide routing should be configured for the local system.
+ROMs/game data and BIOS/firmware obtained separately where required. No commercial game ROMs or proprietary BIOS files are included.
+Installation and upgrading
+Back up your current RetroArch `cores/`, `info/`, remaps, game-specific settings, and RetroBat configuration files.
+Download `Wiimote_Libretro_v1.2.0_Windows_x64.zip` and extract it to a staging folder, not straight over a running installation.
+Copy the desired DLLs from `cores/` to the RetroArch core directory used by your RetroBat setup.
+Copy their matching `.info` files from `info/` to the RetroArch core-info directory.
+Review `retrobat/reference-configs/` and `retrobat/optional-reference/` for examples only. Merge the relevant `<core>` entries into your installed `es_systems_*.cfg` files rather than replacing those files wholesale.
+Configure Lichtknarre → vJoy player assignment and the corresponding RetroArch input/remaps. Check that Player 1 and Player 2 use the intended devices.
+If installing Flycast extras, inspect `optional/flycast/` first; remaps, crosshairs, and NVRAM import resources may overwrite current game settings if used indiscriminately.
+Launch a known working game and test aim, trigger, reload, menu controls, coin/start, and both-player behavior where applicable. Keep your backups until satisfied.
+Important FBNeo naming note
+`fbneo_shooter_libretro.dll` is the same binary that previously appeared under the alternate name `fbneo_galaga_ir_libretro.dll` in an early v1.2.0 staging package. Its SHA-256 matches the v1.0.0 Shooter DLL. The final release intentionally uses the original v1.0.0 filename and `fbneo_shooter` RetroBat identifier, preserving existing references. Do not install both filenames as separate copies of this same core.
+Known limitations and scope
+These packages were assembled from supplied development archives, not freshly compiled and gameplay-tested as part of this release packaging pass.
+Flycast, PS2, and C64 behavior depends on emulator build, core settings, device ordering and target game.
+Some optional RetroBat references are examples of previous working layouts and may not suit your installed version without merging.
+The development package collects what was supplied, but not every newer core has a complete standalone, reproducible source checkout.
+Core license terms may differ; preserve and review the bundled notices before redistribution or modification.
+License and acknowledgments
+Credit belongs to the upstream Libretro, emulator and individual core developers, as well as the custom-input contributors and testers. Each core retains its own upstream license and attribution requirements; see the included `licenses/` directory and source package. Distribution of modifications does not supersede upstream licenses.
+Project: https://github.com/rcl0ng/wiimote-libretro-cores
