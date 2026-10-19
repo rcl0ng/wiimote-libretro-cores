@@ -1,0 +1,238 @@
+diff --git a/Makefile b/Makefile
+index 108edba..9a04103 100644
+--- a/Makefile
++++ b/Makefile
+@@ -385,6 +385,8 @@ else ifneq (,$(findstring armv,$(platform)))
+ 
+ # Wincross64
+ else ifeq ($(platform), wincross64)
++   COMMONFLAGS += -DNEED_STRCASESTR
++   LDFLAGS += -static
+    AR = x86_64-w64-mingw32-ar
+    CC = x86_64-w64-mingw32-gcc
+    CXX = x86_64-w64-mingw32-g++
+diff --git a/libretro/libretro-core.c b/libretro/libretro-core.c
+index 5898c2c..af3da30 100644
+--- a/libretro/libretro-core.c
++++ b/libretro/libretro-core.c
+@@ -1,3 +1,4 @@
++#include "rc-absolute-gun.h"
+ #include "libretro.h"
+ #include "libretro-core.h"
+ #include "libretro-mapper.h"
+@@ -4752,6 +4753,14 @@ static void retro_set_core_options()
+       },
+ #endif
+ #if !defined(__XPET__) && !defined(__XCBM2__)
++      {
++         "vice_absolute_gun", "Absolute Left Stick Gun", NULL,
++         "Auto selects the documented gun for known filenames. B/R2 fire; keyboard mappings remain available. Manual modes override game detection. Disabled retains native input.",
++         NULL, "input",
++         {{"auto", "Auto by Game"}, {"disabled", "Disabled / Native"},
++          {"magnum", "Magnum Light Phaser"}, {"stack", "Stack Light Rifle"}, {NULL,NULL}},
++         "auto"
++      },
+       {
+          "vice_joyport_type",
+          "RetroPad > Joystick Port Type",
+@@ -5625,6 +5634,38 @@ char* get_variable(const char* key)
+    var.value = NULL; \
+    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+ 
++int rc_vice_gun_active = 0;
++void rc_vice_gun_refresh(void)
++{
++   struct retro_variable v = { "vice_absolute_gun", NULL };
++   int mode = 0, device = 0;
++   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &v) && v.value) {
++      if (!strcmp(v.value,"disabled")) mode=1;
++      else if (!strcmp(v.value,"magnum")) mode=2;
++      else if (!strcmp(v.value,"stack")) mode=3;
++   }
++#if defined(__X64__) || defined(__X64SC__)
++   device = mode==2 ? 14 : mode==3 ? 15 : mode==0 ? rc_c64_gun(info_path) : 0;
++#endif
++   static int reported_device=-1;
++   if(reported_device!=device) {
++      reported_device=device;
++      log_cb(RETRO_LOG_INFO,"[Hybrid Gun] C64 device=%d (14 Magnum, 15 Stack, 0 native), port=1\n",device);
++   }
++   rc_vice_gun_active = device != 0;
++   /* Re-read user device when leaving Auto or switching to normal content. */
++   v.key="vice_joyport_type"; v.value=NULL;
++   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE,&v) && v.value)
++      opt_joyport_type=atoi(v.value);
++   if (device) { opt_joyport_type=device; cur_port=1; }
++   else if (!cur_port_locked) {
++      v.key="vice_joyport"; v.value=NULL;
++      if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE,&v) && v.value)
++         cur_port=atoi(v.value)==1 ? 1 : 2;
++      if(opt_joyport_type>10) cur_port=1;
++   }
++}
++
+ static void update_variables(void)
+ {
+    struct retro_variable var = {0};
+@@ -7865,7 +7906,7 @@ void retro_get_system_info(struct retro_system_info *info)
+ #define GIT_VERSION ""
+ #endif
+    memset(info, 0, sizeof(*info));
+-   info->library_name     = "VICE " CORE_NAME;
++   info->library_name     = "VICE Hybrid Gun " CORE_NAME;
+    info->library_version  = PACKAGE_VERSION "" GIT_VERSION;
+ #if defined(__XVIC__)
+    info->valid_extensions = "d64|d71|d80|d81|d82|g64|g41|x64|t64|tap|prg|p00|crt|bin|zip|7z|gz|d6z|d7z|d8z|g6z|g4z|x6z|cmd|m3u|vfl|vsf|nib|nbz|d2m|d4m|/|20|40|60|a0|b0|rom";
+@@ -8565,6 +8606,7 @@ bool retro_load_game(const struct retro_game_info *info)
+       }
+    }
+ 
++   info_path[0] = 0;
+    /* Content */
+    if (info)
+    {
+@@ -8629,6 +8671,8 @@ bool retro_load_game(const struct retro_game_info *info)
+ 
+ void retro_unload_game(void)
+ {
++   info_path[0] = 0;
++   rc_vice_gun_active = 0;
+    /* Gzip savedisks */
+    if (dc)
+       dc_save_disk_compress(dc);
+diff --git a/libretro/libretro-mapper.c b/libretro/libretro-mapper.c
+index 89f1833..92a3f33 100644
+--- a/libretro/libretro-mapper.c
++++ b/libretro/libretro-mapper.c
+@@ -1,3 +1,6 @@
++#include "rc-absolute-gun.h"
++extern int rc_vice_gun_active;
++extern void rc_vice_gun_refresh(void);
+ #include "libretro.h"
+ #include "libretro-core.h"
+ #include "libretro-mapper.h"
+@@ -115,12 +118,19 @@ int retro_ui_get_pointer_state(int *px, int *py, unsigned int *pbuttons)
+    if (retro_vkbd)
+       return 0;
+ 
++   if (rc_vice_gun_active) {
++      *pbuttons = (input_state_cb(0,RETRO_DEVICE_JOYPAD,0,RETRO_DEVICE_ID_JOYPAD_B) ||
++                   input_state_cb(0,RETRO_DEVICE_JOYPAD,0,RETRO_DEVICE_ID_JOYPAD_R2)) ? 1 : 0;
++      *px = rc_axis_pixel(input_state_cb(0,RETRO_DEVICE_ANALOG,RETRO_DEVICE_INDEX_ANALOG_LEFT,RETRO_DEVICE_ID_ANALOG_X),retrow_crop,retroXS_offset);
++      *py = rc_axis_pixel(input_state_cb(0,RETRO_DEVICE_ANALOG,RETRO_DEVICE_INDEX_ANALOG_LEFT,RETRO_DEVICE_ID_ANALOG_Y),retroh_crop,retroYS_offset);
++   } else {
+    *pbuttons = input_state_cb(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_PRESSED);
+ 
+    *px = input_state_cb(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_X);
+    *py = input_state_cb(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_Y);
+    *px = (int)((*px + 0x7fff) * retrow_crop / 0xffff + retroXS_offset);
+    *py = (int)((*py + 0x7fff) * retroh_crop / 0xffff + retroYS_offset);
++   }
+ 
+    if (opt_joyport_pointer_color > -1)
+    {
+@@ -621,6 +631,7 @@ void update_input(uint8_t disable_keys)
+          RY = joypad_axis[j][AXIS_RY];
+ 
+          /* No analog remappings with non-joysticks and stick overrides */
++         if (rc_vice_gun_active) LX = LY = 0;
+          if (opt_joyport_type > 1)
+          {
+             if (opt_analogmouse == 1 || opt_analogmouse == 3)
+@@ -1048,6 +1059,7 @@ int process_keyboard_pass_through()
+ 
+ void retro_poll_event()
+ {
++   rc_vice_gun_refresh();
+    uint8_t i, j;
+    for (j = 0; j < RETRO_DEVICES; j++)
+    {
+@@ -1341,6 +1353,11 @@ void retro_poll_event()
+       }
+    }
+ 
++   if (rc_vice_gun_active && (opt_joyport_type_prev != (int)opt_joyport_type || cur_port_prev != cur_port)) {
++      opt_joyport_type_prev=opt_joyport_type; cur_port_prev=cur_port;
++      resources_set_int("JoyPort2Device",1);
++      resources_set_int("JoyPort1Device",opt_joyport_type);
++   }
+    /* Default to joysticks, set both ports */
+    if (opt_joyport_type == 1)
+    {
+@@ -1354,7 +1371,7 @@ void retro_poll_event()
+       }
+    }
+    /* Other than a joystick, set only cur_port */
+-   else if (opt_joyport_type > 1 && cur_port < 3)
++   else if (opt_joyport_type > 1 && cur_port < 3 && !rc_vice_gun_active)
+    {
+       if (opt_joyport_type_prev != opt_joyport_type || cur_port_prev != cur_port)
+       {
+diff --git a/libretro/rc-absolute-gun.h b/libretro/rc-absolute-gun.h
+new file mode 100644
+index 0000000..ab78ba6
+--- /dev/null
++++ b/libretro/rc-absolute-gun.h
+@@ -0,0 +1,62 @@
++/* Shared absolute-gun helpers. GPL-2.0-or-later. */
++#ifndef RC_ABSOLUTE_GUN_H
++#define RC_ABSOLUTE_GUN_H
++#include <stdint.h>
++#include <string.h>
++/* Conservative basename recognition: punctuation/region suffixes are ignored,
++ * but complete normalized names are compared (no substring matching). */
++static inline void rc_content_name(const char *path, char *out, unsigned cap)
++{
++    const char *b = path ? path : "", *p; unsigned n = 0;
++    for (p=b; *p; ++p) if (*p=='/' || *p=='\\') b=p+1;
++    for (p=b; *p && *p!='.' && *p!='(' && *p!='['; ++p) {
++        unsigned char c=(unsigned char)*p;
++        if (c>='A' && c<='Z') c=(unsigned char)(c+32);
++        if ((c>='a' && c<='z') || (c>='0' && c<='9')) {
++            if (n+1>=cap) { out[0]=0; return; }
++            out[n++]=(char)c;
++        }
++    }
++    out[n]=0;
++}
++static inline int rc_match_list(const char *name, const char *const *list, unsigned count)
++{ unsigned i; for(i=0;i<count;++i) if(!strcmp(name,list[i])) return 1; return 0; }
++static inline int rc_c64_gun(const char *path)
++{
++    char n[128];
++    static const char *const mag[]={"armydays","babyblues","blazeout","cosmicstorm","duckhunt","gangster","ghosttown","goosebusters","gunslinger","operationthunderbolt","operationwolf","timetraveller","shootinputin"};
++    static const char *const stack[]={"cosmiccommando","grouseshoot","glorioustwelth","glorioustwelfth","glorious12th","highnoonshootout","indianattack","shootinggallery","starbasedefence64","starbasedefence"};
++    rc_content_name(path,n,sizeof(n));
++    if(rc_match_list(n,mag,sizeof(mag)/sizeof(*mag))) return 14;
++    if(rc_match_list(n,stack,sizeof(stack)/sizeof(*stack))) return 15;
++    return 0;
++}
++static inline int rc_3do_guns(const char *path)
++{
++    char n[128];
++    static const char *const two[]={"crimepatrol","drugwars","lastbountyhunterthe","thelastbountyhunter","lastbountyhunter","maddogiithelostgold","maddog2thelostgold","maddogmccree","spacepirates","whoshotjohnnyrock"};
++    rc_content_name(path,n,sizeof(n));
++    if(!strcmp(n,"corpsekiller")) return 1;
++    return rc_match_list(n,two,sizeof(two)/sizeof(*two)) ? 2 : 0;
++}
++/* 1=HOTD3, 2=Silent Scope, 3=Starsky/Hutch. */
++static inline int rc_xbox_profile(const char *path)
++{
++    char n[128]; rc_content_name(path,n,sizeof(n));
++    if(!strcmp(n,"houseofthedeadiiithe") || !strcmp(n,"thehouseofthedeadiii") || !strcmp(n,"houseofthedeadiii") || !strcmp(n,"houseofthedead3")) return 1;
++    if(!strcmp(n,"silentscopecomplete")) return 2;
++    if(!strcmp(n,"starskyhutch") || !strcmp(n,"starskyandhutch")) return 3;
++    return 0;
++}
++static inline int rc_axis_pixel(int16_t axis, int size, int offset)
++{ return size>0 ? offset+(int)(((int64_t)axis+32768)*(size-1)/65535) : offset; }
++static inline int16_t rc_invert_axis(int16_t axis)
++{ return axis == -32768 ? 32767 : (int16_t)-axis; }
++static inline int16_t rc_calibrated_axis(int16_t axis,float scale,int offset)
++{
++    float v=(float)axis*scale+(float)offset;
++    if(v<-32768.0f) return -32768;
++    if(v>32767.0f) return 32767;
++    return (int16_t)v;
++}
++#endif

@@ -1,0 +1,158 @@
+--- a/src/burn/drv/pre90s/d_galaga.cpp
++++ b/src/burn/drv/pre90s/d_galaga.cpp
+@@ -1097,6 +1097,7 @@
+ bool GalagaIRUnlimitedLives = false;
+ bool GalagaIRInvincible = false;
+ bool GalagaIRDoubleFighter = false;
++int GalagaIRExtraShips = 0;
+ static bool galagaIRReady = false;
+ static bool galagaIREnabled[2] = { false, false };
+ static bool galagaIRFire[2] = { false, false };
+--- a/src/burn/drv/pre90s/d_gaplus.cpp
++++ b/src/burn/drv/pre90s/d_gaplus.cpp
+@@ -344,13 +344,14 @@
+ 
+ 
+ static bool gaplusIRReady=false;
++static int gaplusIRAppliedCount=-1;
+ static UINT8 gaplusIRMove[21];
+ static UINT8 GaplusIRPosition(unsigned axis)
+ {
+  unsigned p=DrvSprRAM[0x82d]&1;
+  if (!axis) {
+   int lo=DrvSprRAM[0x878],hi=DrvSprRAM[0x879];
+-  if (DrvSprRAM[0x8db]) { lo+=48;hi-=48; }
++  // Native task at cf3f already selects bounds from the active escort count.
+   return lo+((ArcadeIRAxis(p,0)+32768)*(hi-lo)+32767)/65535;
+  }
+  int y=0xc8+((ArcadeIRAxis(p,1)+32768)*(0x149-0xc8)+32767)/65535;
+@@ -372,13 +373,25 @@
+   if (DrvSprRAM[0x904+p]<3) DrvSprRAM[0x904+p]=3;
+  }
+  if (playing && GalagaIRInvincible) DrvSprRAM[0x81a]=0xff;
+- // Native six captured escorts, using the game's own initialization values.
+- if (playing && GalagaIRDoubleFighter && !DrvSprRAM[0x8d9] && !DrvSprRAM[0x8db]) {
++ // Use the native escort pool; changing the count rebuilds only that pool.
++ int count=GalagaIRExtraShips;
++ if (!count) gaplusIRAppliedCount=0;
++ if (playing && count && !DrvSprRAM[0x8d9] &&
++     (count!=gaplusIRAppliedCount || !DrvSprRAM[0x8db])) {
++  // Fill symmetric pairs first: +16/-16, then +32/-32, then +48/-48.
++  static const int slots[6]={0,1,2,3,4,5};
+   for (int i=0;i<6;i++) {
+-   DrvSprRAM[0x6c2+i*2]=0xf0;DrvSprRAM[0x6c3+i*2]=0x25;
+-   DrvSprRAM[0x16c2+i*2]=0;DrvSprRAM[0x16c3+i*2]=0x81;
++   DrvSprRAM[0x6c2+i*2]=0;DrvSprRAM[0x6c3+i*2]=0;
++   DrvSprRAM[0xec2+i*2]=0;DrvSprRAM[0xec3+i*2]=0;
++   DrvSprRAM[0x16c2+i*2]=0;DrvSprRAM[0x16c3+i*2]=0;
++  }
++  for (int i=0;i<count;i++) {
++   int slot=slots[i];
++   DrvSprRAM[0x6c2+slot*2]=0xf0;DrvSprRAM[0x6c3+slot*2]=0x25;
++   DrvSprRAM[0x16c2+slot*2]=0;DrvSprRAM[0x16c3+slot*2]=0x81;
+   }
+   DrvSprRAM[0x8db]=1;
++  gaplusIRAppliedCount=count;
+  }
+ }
+ 
+@@ -538,6 +551,7 @@
+ 
+ static INT32 DrvDoReset()
+ {
++ gaplusIRAppliedCount=-1;
+ 	memset (AllRam, 0, RamEnd - AllRam);
+ 
+ 	M6809Open(0);
+@@ -729,6 +743,7 @@
+ static INT32 DrvExit()
+ {
+  gaplusIRReady=false;
++ gaplusIRAppliedCount=-1;
+ 	GenericTilesExit();
+ 
+ 	M6809Exit();
+@@ -1006,6 +1021,7 @@
+ 		SCAN_VAR(sub2_irq_mask);
+ 		SCAN_VAR(flipscreen);
+ 		SCAN_VAR(starfield_framecount);
++  SCAN_VAR(gaplusIRAppliedCount);
+ 	}
+ 
+ 	return 0;
+--- a/src/burn/drv/pre90s/d_namcos1.cpp
++++ b/src/burn/drv/pre90s/d_namcos1.cpp
+@@ -928,7 +928,7 @@
+  }
+  if (playing && GalagaIRUnlimitedLives && DrvMainRAM[0x76]<3) DrvMainRAM[0x76]=3;
+  if (playing && GalagaIRInvincible) DrvMainRAM[0xd0]=0x75;
+- if (playing && GalagaIRDoubleFighter && !DrvMainRAM[0x60]) DrvMainRAM[0x64]=2;
++ if (playing && GalagaIRDoubleFighter && !DrvMainRAM[0x60]) DrvMainRAM[0x64]=GalagaIRExtraShips;
+ }
+ 
+ static UINT8 virtual_read(UINT32 address)
+--- a/src/burn/galaga_ir.h
++++ b/src/burn/galaga_ir.h
+@@ -3,6 +3,7 @@
+ extern bool GalagaIRUnlimitedLives;
+ extern bool GalagaIRInvincible;
+ extern bool GalagaIRDoubleFighter;
++extern int GalagaIRExtraShips;
+ void GalagaIRSetInput(unsigned port, bool enabled, int x, int y, bool fire);
+ bool ArcadeIREnabled(unsigned port);
+ int ArcadeIRAxis(unsigned port, unsigned axis);
+--- a/src/burner/libretro/retro_common.cpp
++++ b/src/burner/libretro/retro_common.cpp
+@@ -948,9 +948,9 @@
+ };
+ 
+ static struct retro_core_option_v2_definition var_galaga_double = {
+- "galaga-ir-double-fighter", "Multiple Ships", "Multiple Ships",
+- "Grant the native ship upgrade: Galaga partner, Galaga 88 triple fighter, or Gaplus captured escorts. Existing ships remain when disabled. Not available for Galaxian or Space Invaders.", NULL, "cheat",
+- {{"disabled",NULL},{"enabled",NULL},{NULL,NULL}}, "disabled"
++ "galaga-ir-double-fighter", "Extra Ships", "Extra Ships",
++ "Choose how many native extra ships to grant. Gaplus allows up to six, Galaga 88 up to two, and Galaga one. Disabled stops granting; existing ships can remain.", NULL, "cheat",
++ {{"disabled","Disabled"},{"1","1 extra ship"},{NULL,NULL}}, "disabled"
+ };
+ 
+ void set_environment()
+@@ -960,7 +960,18 @@
+ 	struct retro_vfs_interface_info vfs_iface_info;
+ 
+ 	const char *irDriver=BurnDrvGetTextA(DRV_NAME);
+- if (!irDriver || strcmp(irDriver,"galaxian") && strcmp(irDriver,"invaders"))
++ // Advertise only the counts supported by the loaded game's native upgrade.
++ memset(var_galaga_double.values,0,sizeof(var_galaga_double.values));
++ var_galaga_double.values[0].value="disabled";
++ var_galaga_double.values[0].label="Disabled";
++ const char *counts[]={"1","2","3","4","5","6"};
++ const char *labels[]={"1 extra ship","2 extra ships","3 extra ships","4 extra ships","5 extra ships","6 extra ships"};
++ int maxShips=irDriver && !strcmp(irDriver,"galaga3") ? 6 : irDriver && !strcmp(irDriver,"galaga88") ? 2 : 1;
++ for (int i=0;i<maxShips;i++) {
++  var_galaga_double.values[i+1].value=counts[i];
++  var_galaga_double.values[i+1].label=labels[i];
++ }
++ if (irDriver && (!strcmp(irDriver,"galaga") || !strcmp(irDriver,"galaga3") || !strcmp(irDriver,"galaga88")))
+    vars_systems.push_back(&var_galaga_double);
+ 	vars_systems.push_back(&var_galaga_lives);
+ 	vars_systems.push_back(&var_galaga_invincible);
+@@ -1603,9 +1614,17 @@
+  GalagaIRUnlimitedLives = false;
+  GalagaIRInvincible = false;
+  GalagaIRDoubleFighter = false;
++ GalagaIRExtraShips = 0;
+  var.key = var_galaga_double.key;
+- if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE,&var) && var.value)
+-   GalagaIRDoubleFighter = strcmp(var.value,"enabled") == 0;
++ if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE,&var) && var.value) {
++  const char *name=BurnDrvGetTextA(DRV_NAME);
++  int maxShips=name && !strcmp(name,"galaga3") ? 6 : name && !strcmp(name,"galaga88") ? 2 : 1;
++  // Accept the old v2 toggle in existing options files, plus the new counts.
++  GalagaIRExtraShips=!strcmp(var.value,"enabled") ? maxShips : atoi(var.value);
++  if (GalagaIRExtraShips<0) GalagaIRExtraShips=0;
++  if (GalagaIRExtraShips>maxShips) GalagaIRExtraShips=maxShips;
++  GalagaIRDoubleFighter=GalagaIRExtraShips>0;
++ }
+  var.key = var_galaga_lives.key;
+  if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE,&var) && var.value)
+    GalagaIRUnlimitedLives = strcmp(var.value,"enabled") == 0;

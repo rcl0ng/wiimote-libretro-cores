@@ -1,0 +1,296 @@
+--- a/libretro/libretro.c
++++ b/libretro/libretro.c
+@@ -69,6 +69,10 @@
+ #define RETRO_DEVICE_MENACER              RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_LIGHTGUN, 1)
+ #define RETRO_DEVICE_JUSTIFIERS           RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_LIGHTGUN, 2)
+ #define RETRO_DEVICE_SMASH_CONTROLLER     RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_LIGHTGUN, 3)
++#define RETRO_DEVICE_IR_MENACER RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 20)
++#define RETRO_DEVICE_IR_JUSTIFIER RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 21)
++#define RETRO_DEVICE_IR_JUSTIFIER2 RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 22)
++#define RETRO_DEVICE_IR_PHASER RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 23)
+ #define RETRO_DEVICE_GRAPHIC_BOARD        RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_POINTER, 0)
+ 
+ #include <libretro.h>
+@@ -156,9 +160,9 @@
+ static retro_environment_t environ_cb;
+ static retro_audio_sample_batch_t audio_cb;
+ 
+-enum RetroLightgunInputModes{RetroLightgun, RetroPointer, RetroLeftAnalog};
++enum RetroLightgunInputModes{RetroLightgun, RetroPointer};
+ static enum RetroLightgunInputModes retro_gun_mode = RetroLightgun;
+-static unsigned analog_gun_reload_button = RETRO_DEVICE_ID_JOYPAD_A;
++static unsigned ir_devices[2] = { RETRO_DEVICE_JOYPAD, RETRO_DEVICE_JOYPAD };
+ 
+ /* Cheat Support */
+ #define MAX_CHEATS (150)
+@@ -402,26 +406,47 @@
+    input.analog[i][0] = ((x + 32768) * (bitmap.viewport.w - 1)) / 65535;
+    input.analog[i][1] = ((y + 32768) * (bitmap.viewport.h - 1)) / 65535;
+ 
+-   /* RetroPad B = trigger; X/Y = auxiliary buttons; Start = gun Start.
+-    * The Select reload option restores the original A/Y auxiliary layout.
+-    */
++   /* Fixed Wiimote layout: B trigger, A reload, 1/2 auxiliary. */
+    if (input_state_cb(player, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B))
+       buttons |= INPUT_A;
+-   if (input_state_cb(player, RETRO_DEVICE_JOYPAD, 0,
+-         analog_gun_reload_button == RETRO_DEVICE_ID_JOYPAD_A ?
+-         RETRO_DEVICE_ID_JOYPAD_X : RETRO_DEVICE_ID_JOYPAD_A))
++   if (input_state_cb(player, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X))
+       buttons |= INPUT_B;
+    if (input_state_cb(player, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y))
+       buttons |= INPUT_C;
+    if (input_state_cb(player, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START))
+       buttons |= INPUT_START;
+-   if (input_state_cb(player, RETRO_DEVICE_JOYPAD, 0, analog_gun_reload_button))
++   if (input_state_cb(player, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A))
+    {
+       input.analog[i][0] = -1000;
+       input.analog[i][1] = -1000;
+       buttons |= INPUT_A;
+    }
+    return buttons;
++}
++
++/* -1 native input; -2 unassigned second Justifier; otherwise frontend port. */
++static int ir_gun_player(int slot)
++{
++   if (ir_devices[0] == RETRO_DEVICE_IR_MENACER || ir_devices[0] == RETRO_DEVICE_IR_JUSTIFIER)
++   {
++      if (slot == 4) return 0;
++      if (slot == 5 && ir_devices[0] == RETRO_DEVICE_IR_JUSTIFIER)
++         return ir_devices[1] == RETRO_DEVICE_IR_JUSTIFIER2 ? 1 : -2;
++   }
++   if (slot == 0 && ir_devices[0] == RETRO_DEVICE_IR_PHASER) return 0;
++   if (slot == 4 && ir_devices[1] == RETRO_DEVICE_IR_PHASER) return 1;
++   return -1;
++}
++
++static unsigned update_ir_slot(int slot)
++{
++   int player = ir_gun_player(slot);
++   if (player == -2)
++   {
++      input.analog[slot][0] = input.analog[slot][1] = -1000;
++      return 0;
++   }
++   return update_left_analog_lightgun((unsigned)player, slot);
+ }
+ 
+ static void osd_input_update_internal_bitmasks(void)
+@@ -499,12 +524,9 @@
+             break;
+ 
+          case DEVICE_LIGHTGUN:
+-            if (retro_gun_mode == RetroLeftAnalog)
++            if (ir_gun_player(i) != -1)
+             {
+-               /* Slots 4/5 are the guns on console port 2; do not let
+-                * disabling the port 1 gamepad shift their frontend ports.
+-                */
+-               temp = update_left_analog_lightgun(i >= 4 ? i - 3 : player, i);
++               temp = update_ir_slot(i);
+             }
+             else if ( retro_gun_mode == RetroPointer )
+             {
+@@ -811,9 +833,9 @@
+             break;
+ 
+          case DEVICE_LIGHTGUN:
+-            if (retro_gun_mode == RetroLeftAnalog)
++            if (ir_gun_player(i) != -1)
+             {
+-               temp = update_left_analog_lightgun(i >= 4 ? i - 3 : player, i);
++               temp = update_ir_slot(i);
+             }
+             else if ( retro_gun_mode == RetroPointer )
+             {
+@@ -2086,18 +2108,11 @@
+   var.key = "genesis_plus_gx_gun_input";
+   environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var);
+   {
+-    if (var.value && !strcmp(var.value, "left_analog"))
+-      retro_gun_mode = RetroLeftAnalog;
+-    else if (var.value && !strcmp(var.value, "touchscreen"))
++    if (var.value && !strcmp(var.value, "touchscreen"))
+       retro_gun_mode = RetroPointer;
+     else
+       retro_gun_mode = RetroLightgun;
+   }
+-
+-  var.key = "genesis_plus_gx_analog_gun_reload";
+-  environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var);
+-  analog_gun_reload_button = (var.value && !strcmp(var.value, "select")) ?
+-      RETRO_DEVICE_ID_JOYPAD_SELECT : RETRO_DEVICE_ID_JOYPAD_A;
+ 
+   var.key = "genesis_plus_gx_invert_mouse";
+   environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var);
+@@ -2889,6 +2904,9 @@
+    struct retro_vfs_interface_info vfs_iface_info;
+ 
+    static const struct retro_controller_description port_1[] = {
++      { "Wiimote IR Menacer + Gamepad", RETRO_DEVICE_IR_MENACER },
++      { "Wiimote IR Justifier + Gamepad", RETRO_DEVICE_IR_JUSTIFIER },
++      { "Wiimote IR Light Phaser", RETRO_DEVICE_IR_PHASER },
+       { "Joypad Auto", RETRO_DEVICE_JOYPAD },
+       { "Joypad Port Empty", RETRO_DEVICE_NONE },
+       { "MD Joypad 3 Button", RETRO_DEVICE_MDPAD_3B },
+@@ -2909,6 +2927,8 @@
+    };
+ 
+    static const struct retro_controller_description port_2[] = {
++      { "Wiimote IR Justifier (Player 2)", RETRO_DEVICE_IR_JUSTIFIER2 },
++      { "Wiimote IR Light Phaser", RETRO_DEVICE_IR_PHASER },
+       { "Joypad Auto", RETRO_DEVICE_JOYPAD },
+       { "Joypad Port Empty", RETRO_DEVICE_NONE },
+       { "MD Joypad 3 Button", RETRO_DEVICE_MDPAD_3B },
+@@ -2931,8 +2951,8 @@
+   };
+ 
+    static const struct retro_controller_info ports[] = {
+-      { port_1, 17 },
+-      { port_2, 19 },
++      { port_1, 20 },
++      { port_2, 21 },
+       { 0 },
+    };
+ 
+@@ -3097,7 +3117,7 @@
+ 
+ void retro_get_system_info(struct retro_system_info *info)
+ {
+-   info->library_name = "Genesis Plus GX Analog";
++   info->library_name = "Genesis Plus GX IR Gun";
+ #ifndef GIT_VERSION
+ #define GIT_VERSION ""
+ #endif
+@@ -3141,7 +3161,7 @@
+    info->timing.sample_rate     = SOUND_FREQUENCY;
+ }
+ 
+-void retro_set_controller_port_device(unsigned port, unsigned device)
++static void apply_native_device(unsigned port, unsigned device)
+ {
+    if (port > 1)
+      return;
+@@ -3267,9 +3287,37 @@
+       }
+    }
+ 
++}
++
++static void apply_ir_topology(void)
++{
++   if (ir_devices[0] == RETRO_DEVICE_IR_MENACER || ir_devices[0] == RETRO_DEVICE_IR_JUSTIFIER)
++   {
++      config.input[0].padtype = DEVICE_PAD3B;
++      input.system[0] = SYSTEM_GAMEPAD;
++      input.system[1] = ir_devices[0] == RETRO_DEVICE_IR_MENACER ? SYSTEM_MENACER : SYSTEM_JUSTIFIER;
++   }
++}
++
++void retro_set_controller_port_device(unsigned port, unsigned device)
++{
++   unsigned p;
++   if (port > 1) return;
++   ir_devices[port] = device;
++   /* Rebuild both ports so switching away from hybrid restores native choices,
++    * and a later frontend Port 2 assignment cannot overwrite the hybrid gun. */
++   for (p = 0; p < 2; ++p)
++   {
++      unsigned native = ir_devices[p];
++      if (native == RETRO_DEVICE_IR_PHASER) native = RETRO_DEVICE_PHASER;
++      else if (native == RETRO_DEVICE_IR_JUSTIFIER2) native = RETRO_DEVICE_NONE;
++      else if (native == RETRO_DEVICE_IR_MENACER || native == RETRO_DEVICE_IR_JUSTIFIER)
++         native = RETRO_DEVICE_MDPAD_3B;
++      apply_native_device(p, native);
++   }
++   apply_ir_topology();
+    old_system[0] = input.system[0];
+    old_system[1] = input.system[1];
+-   
+    io_init();
+    input_reset();
+ }
+@@ -3621,6 +3669,7 @@
+       }
+    }
+ 
++   apply_ir_topology();
+    audio_init(SOUND_FREQUENCY, 0);
+    system_init();
+    system_reset();
+@@ -3750,6 +3799,7 @@
+ 
+ void retro_init(void)
+ {
++   ir_devices[0] = ir_devices[1] = RETRO_DEVICE_JOYPAD;
+    struct retro_log_callback log;
+    unsigned level                = 1;
+    uint64_t serialization_quirks = RETRO_SERIALIZATION_QUIRK_PLATFORM_DEPENDENT;
+--- a/Makefile.libretro
++++ b/Makefile.libretro
+@@ -39,7 +39,7 @@
+    override platform += unix
+ endif
+ 
+-TARGET_NAME := genesis_plus_gx
++TARGET_NAME := genesis_plus_gx_analog
+ 
+ LIBS := -lm
+ 
+--- a/libretro/libretro_core_options.h
++++ b/libretro/libretro_core_options.h
+@@ -760,30 +760,16 @@
+       "genesis_plus_gx_gun_input",
+       "Light Gun Input",
+       NULL,
+-      "Use native Light Gun input, Touchscreen input, or absolute Left Analog aiming. Left Analog uses RetroPad B for trigger and Start for gun Start. Configure reload and auxiliary buttons with Analog Gun Reload Button.",
++      "Select the input source for native gun devices. Wiimote IR Device Type choices use left analog directly and ignore this option.",
+       NULL,
+       "input",
+       {
+          { "lightgun",    "Light Gun" },
+          { "touchscreen", "Touchscreen" },
+-         { "left_analog", "Left Analog (Absolute)" },
++
+          { NULL, NULL },
+       },
+       "lightgun"
+-   },
+-   {
+-      "genesis_plus_gx_analog_gun_reload",
+-      "Analog Gun Reload Button",
+-      NULL,
+-      "Applies to Left Analog aiming only. A uses RetroPad A for an offscreen trigger and X/Y for auxiliary actions. Select restores the original layout: Select reload, A/Y auxiliary actions. With the Wiimote vJoy profile, A is Wiimote A, Select is minus, and X/Y are 1/2. Reload requires game support for offscreen shooting.",
+-      NULL,
+-      "input",
+-      {
+-         { "a", "A (Auxiliary: X/Y)" },
+-         { "select", "Select (Auxiliary: A/Y)" },
+-         { NULL, NULL },
+-      },
+-      "a"
+    },
+    {
+       "genesis_plus_gx_gun_cursor",
+--- a/libretro/libretro_core_options_intl.h
++++ b/libretro/libretro_core_options_intl.h
+@@ -450,7 +450,7 @@
+       {
+          { "lightgun",    "Pistola de luz" },
+          { "touchscreen", "Toque na tela" },
+-         { "left_analog", "Left Analog (Absolute)" },
++
+          { NULL, NULL },
+       },
+       NULL
+@@ -1121,7 +1121,7 @@
+       {
+          { "lightgun",    "Light Gun"        },
+          { "touchscreen", "Dokunmatik Ekran" },
+-         { "left_analog", "Left Analog (Absolute)" },
++
+          { NULL, NULL },
+       },
+       NULL

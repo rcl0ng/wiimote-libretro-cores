@@ -1,0 +1,118 @@
+--- a/libretro/libretro.cpp
++++ b/libretro/libretro.cpp
+@@ -142,6 +142,19 @@
+         {
+             r.min_x = 24; r.max_x = 231;
+             r.min_y = 32; r.max_y = 207;
++            // The modal menu (ROM $01:C622) suspends the swatter and polls
++            // a separate cursor in bank $7F. Its origin follows the swatter.
++            // $0112 marks the modal display; $0104 is restored on menu exit.
++            if (Memory.RAM[0x112] == 2 && Memory.RAM[0x104] == 0x0f)
++            {
++                r.name = "mario_paint_fly_menu";
++                r.x = mario_paint_word(0x1000c);
++                r.y = mario_paint_word(0x1000e);
++                r.min_x = mario_paint_word(0x10008);
++                r.min_y = mario_paint_word(0x1000a);
++                r.max_x = r.min_x + 0x66;
++                r.max_y = r.min_y + 0x6e;
++            }
+         }
+         if (r.min_x < -256 || r.max_x >= 512 || r.min_y < -256 || r.max_y >= 512 ||
+             r.max_x < r.min_x || r.max_y < r.min_y ||
+@@ -446,7 +459,7 @@
+     bool diagnostics = environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) &&
+         var.value && !strcmp(var.value, "enabled");
+     if (diagnostics != setting_mouse_diagnostics && log_cb)
+-        log_cb(RETRO_LOG_INFO, "AM_DIAGNOSTICS %s; build=fps-hybrid-v9\n", diagnostics ? "enabled" : "disabled");
++        log_cb(RETRO_LOG_INFO, "AM_DIAGNOSTICS %s; build=dual-mouse-v10\n", diagnostics ? "enabled" : "disabled");
+     setting_mouse_diagnostics = diagnostics;
+ 
+     var.key = "snes9x_mouse_input";
+@@ -929,7 +942,7 @@
+ #ifndef GIT_VERSION
+ #define GIT_VERSION ""
+ #endif
+-    info->library_version = VERSION GIT_VERSION " AM v9";
++    info->library_version = VERSION GIT_VERSION " AM v10";
+     info->valid_extensions = "smc|sfc|swc|fig|bs";
+     info->need_fullpath = false;
+     info->block_extract = false;
+--- a/libretro/analog_mouse_profiles.h
++++ b/libretro/analog_mouse_profiles.h
+@@ -23,19 +23,23 @@
+     r = { "", 0, 0, 0, 255, 0, 223, 0, 0, 127, false };
+     switch (crc)
+     {
+-    case 0xb50503a0: // Arkanoid: Doh It Again (USA), first player's paddle.
+-        if (port != 0 || ram[0x442] != 0xff || ram[0x46e] != 1 ||
+-            ram[0x472] != 1 || ram[0x447] < 8 || ram[0x447] > 64)
++    case 0xb50503a0: // Arkanoid: Doh It Again (USA), interleaved player records.
++    {
++        if (port < 0 || port > 1) return false;
++        const unsigned player = unsigned(port) * 2;
++        if (ram[0x442 + player] != 0xff || ram[0x46e + player] != 1 ||
++            ram[0x472 + player] != 1 || ram[0x447 + player] < 8 || ram[0x447 + player] > 64)
+             return false;
+         r.name = "arkanoid";
+-        r.x = ram[0x44f]; r.y = 0;
+-        r.min_x = 16; r.max_x = 175 - ram[0x447];
+-        r.hotspot_x = ram[0x447] / 2;
++        r.x = ram[0x44f + player]; r.y = 0;
++        r.min_x = 16; r.max_x = 175 - ram[0x447 + player];
++        r.hotspot_x = ram[0x447 + player] / 2;
+         r.paddle = true;
+         // The game caps its signed movement at +/-8. Larger packets do not
+         // move faster, and very large positive values can wrap its arithmetic.
+         r.packet_limit = 8;
+         break;
++    }
+     case 0xdf7200c8: // Lemmings 2 (USA): screen cursor, not world coordinates.
+         if (port != 0) return false;
+         r.name = "lemmings2";
+--- a/tests/analog_mouse_test.cpp
++++ b/tests/analog_mouse_test.cpp
+@@ -155,6 +155,23 @@
+     axes[0][1]=-6388;
+     report_buttons(); p=packet(0); assert(dx(p)==36 && dy(p)==0);
+     ram_word(0x4dc,231); report_buttons(); p=packet(0); assert(dx(p)==0);
++    // Fly pause menu has a separate cursor and movable window origin.
++    Memory.RAM[0x112]=2; Memory.RAM[0x104]=0x0f;
++    ram_word(0x10008,72); ram_word(0x1000a,32);
++    ram_word(0x1000c,172); ram_word(0x1000e,134);
++    axes[0][0]=32767; axes[0][1]=32767;
++    report_buttons(); p=packet(0); assert(dx(p)==2 && dy(p)==8);
++    ram_word(0x1000c,174); ram_word(0x1000e,142);
++    for(int n=0;n<120;n++)
++    { report_buttons(); p=packet(0); assert(dx(p)==0 && dy(p)==0); }
++    axes[0][0]=-32768; axes[0][1]=-32768;
++    report_buttons(); p=packet(0); assert(dx(p)==-102 && dy(p)==-110);
++    ram_word(0x10008,112); ram_word(0x1000a,64);
++    ram_word(0x1000c,112); ram_word(0x1000e,64);
++    report_buttons(); p=packet(0); assert(dx(p)==0 && dy(p)==0);
++    Memory.RAM[0x104]=0; // Closing menu restores the gameplay reference.
++    axes[0][0]=32767; axes[0][1]=-6388;
++    report_buttons(); p=packet(0); assert(dx(p)==0 && dy(p)==0);
+     // Returning to the editor restores its limits even at the same aim.
+     Memory.RAM[0x10e]=0x06; Memory.RAM[0x11a]=0x13;
+     report_buttons(); p=packet(0); assert(dx(p)==24);
+@@ -198,6 +215,19 @@
+         Memory.RAM[0x44f]+=dx(p);
+     }
+     assert(Memory.RAM[0x44f]==16);
++    // Game B uses interleaved P2 fields; each port reads its own paddle.
++    Memory.RAM[0x444]=0xff; Memory.RAM[0x470]=1; Memory.RAM[0x474]=1;
++    Memory.RAM[0x449]=32; Memory.RAM[0x451]=32;
++    axes[1][0]=32767;
++    for(int n=0;n<30;n++)
++    {
++        report_buttons(); p=packet(1);
++        assert(dx(p)>=0 && dx(p)<=8 && dy(p)==0);
++        Memory.RAM[0x451]+=dx(p);
++    }
++    assert(Memory.RAM[0x451]==143 && Memory.RAM[0x44f]==16);
++    Memory.RAM[0x470]=255;
++    assert(!snes9x_analog_mouse_reference_packet(1,ux,uy));
+     // Power-up width changes preserve center aiming and legal limits.
+     axes[0][0]=32767; Memory.RAM[0x447]=48;
+     for (int n=0;n<20;n++)

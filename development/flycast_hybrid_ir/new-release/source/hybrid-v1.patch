@@ -1,0 +1,241 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index c5ac6f6..020759a 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -584,6 +584,10 @@ if(NOT WITH_SYSTEM_ZLIB)
+     option(ZLIB_BUILD_EXAMPLES "Enable Zlib Examples" OFF)
+     add_subdirectory("core/deps/libchdr/deps/zlib-1.3.1" EXCLUDE_FROM_ALL)
+ 	set_target_properties(zlibstatic PROPERTIES POSITION_INDEPENDENT_CODE ON)
++	if(NOT TARGET ZLIB::ZLIB)
++		add_library(ZLIB::ZLIB ALIAS zlibstatic)
++	endif()
++	set(ZLIB_LIBRARY zlibstatic CACHE STRING "Bundled zlib target" FORCE)
+ 	target_link_libraries(${PROJECT_NAME} PRIVATE zlibstatic)
+ 	# help libzip find the package
+ 	set(ZLIB_RELATIVE_PATH "core/deps/libchdr/deps/zlib-1.3.1")
+diff --git a/shell/libretro/hybrid_lightgun.h b/shell/libretro/hybrid_lightgun.h
+new file mode 100644
+index 0000000..d364911
+--- /dev/null
++++ b/shell/libretro/hybrid_lightgun.h
+@@ -0,0 +1,34 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++// Absolute Lichtknarre/vJoy input policy. No deadzone, velocity or integration.
++#pragma once
++#include <algorithm>
++#include <string_view>
++
++namespace hybrid {
++enum class ReloadMode { Offscreen, MappedButton };
++
++inline int coordinate(int axis, int maximum)
++{
++	axis = std::clamp(axis, -32768, 32767);
++	return (axis + 32768) * maximum / 65535;
++}
++
++inline ReloadMode reloadMode(bool arcade, bool atomiswave,
++		std::string_view family, std::string_view gameId)
++{
++	if (!arcade)
++		return ReloadMode::Offscreen;
++	if (atomiswave)
++		return ReloadMode::MappedButton; // Flycast's AW lightgun mapping: BTN0=PUMP.
++	// Match identified cartridge parent/name, not the user's archive basename.
++	// These match standalone's mapped B input (NAOMI_BTN1).
++	if (family == "hotd2" || family == "confmiss" || family == "mok"
++			|| gameId.substr(0, 5) == "hotd2"
++			|| gameId == " CONFIDENTIAL MISSION ---------"
++			|| gameId == "THE MAZE OF THE KINGS")
++		return ReloadMode::MappedButton;
++	// Ninja Assault, Death Crimson OX, Lupin and unknown Naomi profiles:
++	// use the existing per-cabinet NAOMI_RELOAD_KEY implementation.
++	return ReloadMode::Offscreen;
++}
++}
+diff --git a/shell/libretro/libretro.cpp b/shell/libretro/libretro.cpp
+index 1910944..bc1ee4b 100644
+--- a/shell/libretro/libretro.cpp
++++ b/shell/libretro/libretro.cpp
+@@ -70,6 +70,8 @@
+ #include "oslib/i18n.h"
+ #include "input/dreampotato.h"
+ #include "storage.h"
++#include "hw/naomi/naomi_roms.h"
++#include "hybrid_lightgun.h"
+ 
+ // SMB support does not work when the path contains a back-slash, so just stick to using the portable forward-slash instead.
+ constexpr char slash = '/';
+@@ -82,6 +84,8 @@ constexpr char slash = '/';
+ #define RETRO_DEVICE_POPNMUSIC				RETRO_DEVICE_SUBCLASS( RETRO_DEVICE_JOYPAD, 6 )
+ #define RETRO_DEVICE_RACING					RETRO_DEVICE_SUBCLASS( RETRO_DEVICE_JOYPAD, 7 )
+ #define RETRO_DEVICE_DENSHA					RETRO_DEVICE_SUBCLASS( RETRO_DEVICE_JOYPAD, 8 )
++#define RETRO_DEVICE_HYBRID_LIGHTGUN RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 10)
++
+ #define RETRO_DEVICE_FULL_CONTROLLER		RETRO_DEVICE_SUBCLASS( RETRO_DEVICE_JOYPAD, 9 )
+ 
+ #define RETRO_ENVIRONMENT_RETROARCH_START_BLOCK 0x800000
+@@ -331,6 +335,7 @@ void retro_set_environment(retro_environment_t cb)
+ 			{ "Keyboard",			RETRO_DEVICE_KEYBOARD },
+ 			{ "Mouse",				RETRO_DEVICE_MOUSE },
+ 			{ "Light Gun",			RETRO_DEVICE_LIGHTGUN },
++			{ "Hybrid Lightgun (Left Stick)", RETRO_DEVICE_HYBRID_LIGHTGUN },
+ 			{ "Twin Stick",			RETRO_DEVICE_TWINSTICK },
+ 			{ "Saturn Twin-Stick",	RETRO_DEVICE_TWINSTICK_SATURN },
+ 			{ "Pointer",			RETRO_DEVICE_POINTER },
+@@ -1705,7 +1710,7 @@ static const char *get_axis_name(unsigned index, const char *default_name)
+ 
+ static void set_input_descriptors()
+ {
+-	struct retro_input_descriptor desc[100];
++	struct retro_input_descriptor desc[160];
+ 	int descriptor_index = 0;
+ 	if (settings.platform.isArcade())
+ 	{
+@@ -1716,6 +1721,20 @@ static void set_input_descriptors()
+ 			switch (config::MapleMainDevices[i])
+ 			{
+ 			case MDT_LightGun:
++				if (device_type[i] == RETRO_DEVICE_HYBRID_LIGHTGUN)
++				{
++					static const char *labels[16] = {
++						"Trigger", "Reload (mapped button / pump)", "Coin", "Start",
++						"D-Pad Up", "D-Pad Down", "D-Pad Left", "D-Pad Right",
++						"Reload (Auto)", "Reload (offscreen)", "Game Button 3", "Game Button 4",
++						"Game Button 5", "Game Button 6", "Test", "Service"
++					};
++					for (unsigned b = 0; b < 16; ++b)
++						desc[descriptor_index++] = { i, RETRO_DEVICE_JOYPAD, 0, b, labels[b] };
++					desc[descriptor_index++] = { i, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_X, "Gun X (absolute)" };
++					desc[descriptor_index++] = { i, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_Y, "Gun Y (absolute)" };
++					break;
++				}
+ 				name = get_button_name(RETRO_DEVICE_LIGHTGUN, RETRO_DEVICE_ID_LIGHTGUN_DPAD_LEFT, "D-Pad Left");
+ 				if (name != NULL)
+ 					desc[descriptor_index++] = { i, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_DPAD_LEFT, name };
+@@ -1877,7 +1896,20 @@ static void set_input_descriptors()
+ 				break;
+ 
+ 			case MDT_LightGun:
+-				desc[descriptor_index++] = { i, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_DPAD_LEFT,  "D-Pad Left" };
++				if (device_type[i] == RETRO_DEVICE_HYBRID_LIGHTGUN)
++				{
++					static const char *labels[16] = {
++						"Trigger", "Reload (mapped button / pump)", "Coin", "Start",
++						"D-Pad Up", "D-Pad Down", "D-Pad Left", "D-Pad Right",
++						"Reload (Auto)", "Reload (offscreen)", "Game Button 3", "Game Button 4",
++						"Game Button 5", "Game Button 6", "Test", "Service"
++					};
++					for (unsigned b = 0; b < 16; ++b)
++						desc[descriptor_index++] = { i, RETRO_DEVICE_JOYPAD, 0, b, labels[b] };
++					desc[descriptor_index++] = { i, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_X, "Gun X (absolute)" };
++					desc[descriptor_index++] = { i, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_Y, "Gun Y (absolute)" };
++					break;
++				}				desc[descriptor_index++] = { i, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_DPAD_LEFT,  "D-Pad Left" };
+ 				desc[descriptor_index++] = { i, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_DPAD_UP,    "D-Pad Up" };
+ 				desc[descriptor_index++] = { i, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_DPAD_DOWN,  "D-Pad Down" };
+ 				desc[descriptor_index++] = { i, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_DPAD_RIGHT, "D-Pad Right" };
+@@ -2559,11 +2591,11 @@ const char* retro_get_system_directory()
+ 
+ void retro_get_system_info(struct retro_system_info *info)
+ {
+-   info->library_name = "Flycast";
++   info->library_name = "Flycast Hybrid IR";
+ #ifndef GIT_VERSION
+ #define GIT_VERSION "undefined"
+ #endif
+-   info->library_version = GIT_VERSION;
++   info->library_version = "v1 / " GIT_VERSION;
+    info->valid_extensions = "chd|cdi|elf|cue|gdi|lst|bin|dat|zip|7z|m3u";
+    info->need_fullpath = true;
+    info->block_extract = true;
+@@ -2596,10 +2628,11 @@ unsigned retro_get_region()
+ // Controller
+ void retro_set_controller_port_device(unsigned in_port, unsigned device)
+ {
+-	if (device_type[in_port] != (int)device && in_port < MAPLE_PORTS)
++	if (in_port < MAPLE_PORTS && device_type[in_port] != (int)device)
+ 	{
+ 		devices_need_refresh = true;
+ 		device_type[in_port] = device;
++		kcode[in_port] = ~0U;
+ 		switch (device)
+ 		{
+ 			case RETRO_DEVICE_JOYPAD:
+@@ -2618,6 +2651,7 @@ void retro_set_controller_port_device(unsigned in_port, unsigned device)
+ 			case RETRO_DEVICE_MOUSE:
+ 				config::MapleMainDevices[in_port] = MDT_Mouse;
+ 				break;
++			case RETRO_DEVICE_HYBRID_LIGHTGUN:
+ 			case RETRO_DEVICE_LIGHTGUN:
+ 			case RETRO_DEVICE_POINTER:
+ 				config::MapleMainDevices[in_port] = MDT_LightGun;
+@@ -3159,11 +3193,68 @@ static int16_t getBitmask(u32 port, int deviceType)
+ 	return ret;
+ }
+ 
++static void UpdateHybridLightgun(u32 port)
++{
++	const bool arcade = settings.platform.isArcade();
++	const bool aw = settings.platform.isAtomiswave();
++	const Game *game = CurrentCartridge != nullptr ? CurrentCartridge->game : nullptr;
++	const char *family = game != nullptr ? (game->parent_name != nullptr ? game->parent_name : game->name) : "";
++	const auto mode = hybrid::reloadMode(arcade, aw, family, settings.content.gameId);
++	unsigned bits = static_cast<uint16_t>(getBitmask(port, RETRO_DEVICE_HYBRID_LIGHTGUN));
++	int x = input_cb(port, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_X);
++	int y = input_cb(port, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_Y);
++	// Match standalone GamepadDevice's absolute mapping, before its radial deadzone.
++	mo_x_abs[port] = hybrid::coordinate(x, 639);
++	mo_y_abs[port] = hybrid::coordinate(y, 479);
++	lightgun_params[port].x = mo_x_abs[port];
++	lightgun_params[port].y = mo_y_abs[port];
++	lightgun_params[port].offscreen = false;
++	kcode[port] = ~0U; // Clear every previous button, including synthetic reload.
++	joyx[port] = joyy[port] = joyrx[port] = joyry[port] = lt[port] = rt[port] = 0;
++	const bool reloadAuto = bits & (1U << RETRO_DEVICE_ID_JOYPAD_A);
++	const bool offscreen = (bits & (1U << RETRO_DEVICE_ID_JOYPAD_X))
++			|| (reloadAuto && mode == hybrid::ReloadMode::Offscreen);
++	const bool mapped = (bits & (1U << RETRO_DEVICE_ID_JOYPAD_Y))
++			|| (reloadAuto && mode == hybrid::ReloadMode::MappedButton);
++	const uint32_t trigger = !arcade ? DC_BTN_A : aw ? AWAVE_TRIGGER_KEY : NAOMI_BTN0_KEY;
++	const uint32_t reloadKey = !arcade ? DC_BTN_RELOAD : aw ? AWAVE_BTN0_KEY : NAOMI_RELOAD_KEY;
++	const uint32_t buttonKey = !arcade ? DC_BTN_B : aw ? AWAVE_BTN0_KEY : NAOMI_BTN1_KEY;
++	setDeviceButton(port, trigger, !offscreen && (bits & (1U << RETRO_DEVICE_ID_JOYPAD_B)));
++	setDeviceButton(port, buttonKey, mapped);
++	if (!aw)
++		setDeviceButton(port, reloadKey, offscreen);
++	else if (offscreen)
++	{
++		mo_x_abs[port] = mo_y_abs[port] = -1;
++		setDeviceButton(port, AWAVE_TRIGGER_KEY, true);
++	}
++	// Existing Naomi/Maple hardware applies its per-game offscreen conversion;
++	// preserve the overlay position. AW reload is the native pump bit.
++	for (unsigned id : {RETRO_DEVICE_ID_JOYPAD_SELECT, RETRO_DEVICE_ID_JOYPAD_START,
++		RETRO_DEVICE_ID_JOYPAD_UP, RETRO_DEVICE_ID_JOYPAD_DOWN,
++		RETRO_DEVICE_ID_JOYPAD_LEFT, RETRO_DEVICE_ID_JOYPAD_RIGHT,
++		RETRO_DEVICE_ID_JOYPAD_L, RETRO_DEVICE_ID_JOYPAD_R,
++		RETRO_DEVICE_ID_JOYPAD_L2, RETRO_DEVICE_ID_JOYPAD_R2})
++		setDeviceButtonStateFromBitmap(bits, port, RETRO_DEVICE_JOYPAD, id);
++	// Test/Service are explicit Controls actions; do not inherit the stock
++	// R3-to-Button9 shortcut controlled by the core's service-button option.
++	if (arcade)
++	{
++		setDeviceButton(port, aw ? AWAVE_TEST_KEY : NAOMI_TEST_KEY, bits & (1U << RETRO_DEVICE_ID_JOYPAD_L3));
++		setDeviceButton(port, aw ? AWAVE_SERVICE_KEY : NAOMI_SERVICE_KEY, bits & (1U << RETRO_DEVICE_ID_JOYPAD_R3));
++	}
++}
++
+ static void UpdateInputState(u32 port)
+ {
+ 	if (gl_ctx_resetting)
+ 		return;
+ 
++	if (device_type[port] == RETRO_DEVICE_HYBRID_LIGHTGUN)
++	{
++		UpdateHybridLightgun(port);
++		return;
++	}
+ 	if (settings.platform.isArcade())
+ 	{
+ 		UpdateInputStateNaomi(port);
